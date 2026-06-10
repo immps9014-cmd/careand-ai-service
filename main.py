@@ -153,7 +153,7 @@ def health() -> dict[str, Any]:
         "phase": "v0.2 실구현",
         "models": {
             "matching": "rule-v1",
-            "stt": f"faster-whisper-{WHISPER_MODEL_NAME}-int8 (lazy)",
+            "stt": f"faster-whisper-{WHISPER_MODEL_LABEL}-int8 (lazy)",
             "llm": llm_state,
             "anomaly": "rule-v1",
             "forecast": "seasonal-naive-v1",
@@ -258,6 +258,8 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
 # 추론은 락으로 직렬화(2코어 박스에서 동시 추론 방지).
 
 WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
+# 라벨용 짧은 이름 (경로 지정 시 디렉토리명만)
+WHISPER_MODEL_LABEL = os.path.basename(WHISPER_MODEL_NAME.rstrip("/")) or WHISPER_MODEL_NAME
 WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "2"))
 _AUDIO_MAX_BYTES = 50 * 1024 * 1024
 
@@ -361,7 +363,7 @@ def transcribe(req: TranscribeRequest) -> dict[str, Any]:
         "confidence": confidence,
         "duration_sec": round(info.duration, 1),
         "language": info.language,
-        "model": f"faster-whisper-{WHISPER_MODEL_NAME}-int8",
+        "model": f"faster-whisper-{WHISPER_MODEL_LABEL}-int8",
     }
 
 

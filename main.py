@@ -274,13 +274,23 @@ def _get_whisper():
                 from faster_whisper import WhisperModel
 
                 logger.info("Whisper 모델 로드 시작: %s (int8, threads=%d)", WHISPER_MODEL_NAME, WHISPER_THREADS)
-                _whisper_model = WhisperModel(
-                    WHISPER_MODEL_NAME,
-                    device="cpu",
-                    compute_type="int8",
-                    cpu_threads=WHISPER_THREADS,
-                    download_root=os.path.join(os.path.dirname(__file__), "models"),
-                )
+                try:
+                    # local_files_only: 서비스는 절대 네트워크 다운로드를 하지 않는다
+                    # (모델 준비는 fetch_model.py 전담 — 부재 시 즉시 503, 행 방지)
+                    _whisper_model = WhisperModel(
+                        WHISPER_MODEL_NAME,
+                        device="cpu",
+                        compute_type="int8",
+                        cpu_threads=WHISPER_THREADS,
+                        download_root=os.path.join(os.path.dirname(__file__), "models"),
+                        local_files_only=True,
+                    )
+                except Exception as e:
+                    logger.warning("Whisper 모델 미준비: %s", e)
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"STT model not ready (fetch_model.py로 다운로드 필요): {WHISPER_MODEL_NAME}",
+                    )
                 logger.info("Whisper 모델 로드 완료")
     return _whisper_model
 

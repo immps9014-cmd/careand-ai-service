@@ -1,16 +1,21 @@
 """
-Care& AI 마이크로서비스 (FastAPI stub)
+Care& AI 마이크로서비스 (FastAPI)
 
-Laravel 백엔드의 AiService.php가 호출하는 6개 엔드포인트를 mock 응답으로 노출.
-향후 careand-ml 산출물(matching/anomaly/forecast/llm/voice/rag)을 단계적으로 교체.
+Laravel 백엔드의 AiService.php가 호출하는 엔드포인트 제공.
 
-엔드포인트:
-  POST /ai/match/recommend       - 매칭 추천
-  POST /ai/voice/transcribe       - STT
-  POST /ai/voice/summarize        - 일지 요약 (보호자/의료진)
-  POST /ai/anomaly/score          - 이상징후 스코어
-  POST /ai/chatbot/answer         - 챗봇 RAG
-  POST /ai/forecast/demand        - 수요 예측
+구현 상태 (2026-06-10 실구현 전환):
+  POST /ai/match/recommend   - 매칭 추천         [rule-v1 실구현]
+  POST /ai/voice/transcribe  - STT               [stub — STT 엔진 미도입]
+  POST /ai/voice/summarize   - 일지 요약          [LLM(Claude) + 휴리스틱 폴백]
+  POST /ai/anomaly/score     - 이상징후 스코어    [rule-v1 실구현]
+  POST /ai/chatbot/answer    - 챗봇              [LLM(Claude) + KB 폴백]
+  POST /ai/forecast/demand   - 수요 예측          [seasonal-naive-v1 실구현 (DB 이력)]
+  POST /chatbot/postpartum   - 산후 챗봇          [LLM(Claude) + 룰 폴백]
+  POST /matching/postpartum  - 산후 매칭          [rule-v1 실구현 (DB 직결)]
+  POST /care-log/generate    - 케어 일지 생성     [LLM(Claude) + 템플릿 폴백]
+
+LLM: .env의 ANTHROPIC_API_KEY가 있으면 Claude API 실호출, 없거나 호출 실패 시
+     각 엔드포인트의 룰/템플릿 폴백으로 응답 (응답 model 필드로 구분 가능).
 
 인증: Authorization: Bearer <AI_SERVICE_TOKEN> (env로 검증)
 """
@@ -18,16 +23,26 @@ Laravel 백엔드의 AiService.php가 호출하는 6개 엔드포인트를 mock 
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
+import urllib.error
+import urllib.request
+from datetime import date, timedelta
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, Header, HTTPException
+from pydantic import BaseModel
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 EXPECTED_TOKEN = os.environ.get("AI_SERVICE_TOKEN", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+logger = logging.getLogger("careand-ai")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 # ───────────────────────── DB 연결 헬퍼 ─────────────────────────
@@ -46,10 +61,74 @@ def get_db_conn():
         autocommit=False,
     )
 
+
+# ───────────────────────── LLM(Claude) 헬퍼 ─────────────────────────
+def llm_available() -> bool:
+    return bool(ANTHROPIC_API_KEY)
+
+
+def llm_complete(system: str, user_msg: str, max_tokens: int = 1024, temperature: float = 0.3) -> str | None:
+    """Claude Messages API 호출. 키 없음/실패 시 None (호출부가 폴백 처리)."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    payload = json.dumps({
+        "model": ANTHROPIC_MODEL,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system,
+        "messages": [{"role": "user", "content": user_msg}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
+        text = "".join(parts).strip()
+        return text or None
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
+        except Exception:
+            detail = ""
+        logger.warning("LLM HTTP %s: %s", e.code, detail[:200])
+        return None
+    except Exception as e:
+        logger.warning("LLM 호출 실패: %s", e)
+        return None
+
+
+def llm_complete_json(system: str, user_msg: str, max_tokens: int = 1024) -> dict | None:
+    """JSON 응답 강제 호출. 파싱 실패 시 None."""
+    text = llm_complete(system + "\n\n반드시 유효한 JSON 객체 하나만 출력하라. 마크다운 코드펜스·설명 금지.",
+                        user_msg, max_tokens=max_tokens, temperature=0.2)
+    if not text:
+        return None
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except (ValueError, TypeError):
+        logger.warning("LLM JSON 파싱 실패: %.120s", raw)
+        return None
+
+
 app = FastAPI(
     title="Care& AI Service",
-    version="0.1.0-stub",
-    description="Care& AI 마이크로서비스 — Phase D-1 stub 단계",
+    version="0.2.0",
+    description="Care& AI 마이크로서비스 — 실구현 전환(룰/시계열 + LLM 폴백 구조)",
 )
 
 
@@ -65,32 +144,29 @@ def verify_token(authorization: str | None = Header(default=None)) -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    llm_state = f"ready({ANTHROPIC_MODEL})" if llm_available() else "fallback (ANTHROPIC_API_KEY 미설정)"
     return {
         "status": "ok",
         "service": "careand-ai-service",
-        "phase": "stub",
+        "phase": "v0.2 실구현",
         "models": {
-            "matching": "stub",
+            "matching": "rule-v1",
             "stt": "stub",
-            "llm": "stub",
-            "anomaly": "stub",
-            "forecast": "stub",
-            "rag": "stub",
+            "llm": llm_state,
+            "anomaly": "rule-v1",
+            "forecast": "seasonal-naive-v1",
+            "rag": llm_state,
         },
     }
 
 
-# ───────────────────────── 1. 매칭 추천 (룰 기반) ─────────────────────────
+# ───────────────────────── 1. 매칭 추천 (룰 기반 실구현) ─────────────────────────
 #
 # 점수 = 0.4 * 특기일치  +  0.3 * 거리점수  +  0.2 * 평점점수  +  0.1 * 경험점수
 #  - 특기일치: 어르신 질환↔인력 특기 교집합 비율 (0~1)
 #  - 거리점수: max(0, 1 - dist_km/10) (10km 안에서만 양의 점수)
 #  - 평점점수: rating_avg / 5.0
 #  - 경험점수: min(completed_sessions / 100, 1.0)
-#
-# 향후 careand-ml의 ALS+KoSimCSE 학습 모델로 교체 가능.
-
-import math
 
 
 class CaregiverFeature(BaseModel):
@@ -125,10 +201,6 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature) -> tuple[floa
     senior_lat = senior.get("lat")
     senior_lng = senior.get("lng")
 
-    # 1. 특기 일치도 (0.3~1.0)
-    #    - 데이터 없음: 0.5 중립
-    #    - 일치: 비례 점수
-    #    - 어르신 질환 있는데 인력 특기 미일치: 0.3 (기본 케어 가능 점수)
     matched = diseases & specialties
     if not diseases:
         specialty_score = 0.5
@@ -137,7 +209,6 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature) -> tuple[floa
     else:
         specialty_score = 0.3
 
-    # 2. 거리 (좌표가 있을 때만)
     if senior_lat is not None and senior_lng is not None and cg.lat is not None and cg.lng is not None:
         dist_km = _haversine_km(senior_lat, senior_lng, cg.lat, cg.lng)
         distance_score = max(0.0, 1.0 - dist_km / 10.0)
@@ -145,10 +216,7 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature) -> tuple[floa
         dist_km = None
         distance_score = 0.5
 
-    # 3. 평점 (0~1)
     rating_score = max(0.0, min(cg.rating_avg / 5.0, 1.0))
-
-    # 4. 경험 (0~1, 100 sessions 이상은 만점)
     exp_score = min(cg.completed_sessions / 100.0, 1.0)
 
     final = 0.4 * specialty_score + 0.3 * distance_score + 0.2 * rating_score + 0.1 * exp_score
@@ -181,7 +249,7 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
     return {"candidates": top, "scoring_method": "rule-v1"}
 
 
-# ───────────────────────── 2. STT ─────────────────────────
+# ───────────────────────── 2. STT (미구현 — 정직한 stub) ─────────────────────────
 
 class TranscribeRequest(BaseModel):
     audio_url: str
@@ -190,6 +258,7 @@ class TranscribeRequest(BaseModel):
 
 @app.post("/ai/voice/transcribe", dependencies=[Depends(verify_token)])
 def transcribe(req: TranscribeRequest) -> dict[str, Any]:
+    """STT 엔진 미도입 — Whisper 등 도입 전까지 stub 유지 (model 필드로 식별)."""
     return {
         "stt_text": "오늘 어머님 점심 반 그릇 드시고, 산책 30분 하셨고, 혈압 정상이었어요. 기분도 좋아 보이셨어요.",
         "confidence": 0.948,
@@ -199,7 +268,7 @@ def transcribe(req: TranscribeRequest) -> dict[str, Any]:
     }
 
 
-# ───────────────────────── 3. 일지 요약 ─────────────────────────
+# ───────────────────────── 3. 일지 요약 (LLM + 휴리스틱 폴백) ─────────────────────────
 
 class SummarizeRequest(BaseModel):
     stt_text: str
@@ -207,37 +276,61 @@ class SummarizeRequest(BaseModel):
     output_versions: list[str] = ["guardian", "medical"]
 
 
-@app.post("/ai/voice/summarize", dependencies=[Depends(verify_token)])
-def summarize(req: SummarizeRequest) -> dict[str, Any]:
+_SUMMARIZE_SYSTEM = (
+    "너는 시니어 돌봄 플랫폼의 케어 일지 요약 도우미다. 요양보호사의 음성 기록(STT)을 받아 "
+    "보호자용(따뜻하고 쉬운 존댓말 2~3문장)과 의료진용(간결한 임상 메모)으로 요약한다. "
+    "출력 JSON 스키마: {\"guardian_version\": str, \"medical_version\": str, "
+    "\"categorized\": {\"meal\"?: {\"percentage\": int}, \"exercise\"?: {\"minutes\": int, \"type\": str}, "
+    "\"vital\"?: object, \"mood\"?: str}}. 기록에 없는 사실을 지어내지 마라."
+)
+
+
+def _summarize_heuristic(stt_text: str) -> dict[str, Any]:
+    """LLM 불가 시 키워드 기반 최소 분류 폴백."""
+    t = stt_text
+    categorized: dict[str, Any] = {}
+    if any(k in t for k in ("식사", "드시", "그릇", "점심", "아침", "저녁")):
+        pct = 50 if ("반 그릇" in t or "절반" in t) else 100 if ("다 드" in t or "완식" in t) else None
+        categorized["meal"] = {"percentage": pct} if pct else {"noted": True}
+    if any(k in t for k in ("산책", "운동", "걷")):
+        categorized["exercise"] = {"type": "walking"}
+    if any(k in t for k in ("혈압", "맥박", "체온", "혈당")):
+        categorized["vital"] = {"noted": True}
+    if any(k in t for k in ("기분", "웃", "좋아 보")):
+        categorized["mood"] = "positive"
+    elif any(k in t for k in ("우울", "힘들어", "불안")):
+        categorized["mood"] = "negative"
+
+    head = t[:120] + ("…" if len(t) > 120 else "")
     return {
-        "guardian_version": (
-            "오늘 어머님이 점심을 평소보다 적게 드셨고(반 그릇), "
-            "식사 후 거실 산책 20분 다녀오셨습니다. 혈압은 정상 범위였고 기분도 좋아 보이셨어요."
-        ),
-        "medical_version": "식사량 50% / 운동 20분 / BP 정상 / 정서 안정. 식이 섭취 저하 관찰됨.",
-        "categorized": {
-            "meal": {"percentage": 50},
-            "exercise": {"minutes": 20, "type": "walking"},
-            "vital": {"bp": "normal"},
-            "mood": "positive",
-        },
-        "confidence": 0.93,
-        "model": "stub",
+        "guardian_version": f"오늘 돌봄 기록 요약입니다: {head}",
+        "medical_version": f"[STT 원문 발췌] {head}",
+        "categorized": categorized,
+        "confidence": 0.5,
+        "model": "heuristic-fallback",
     }
 
 
-# ───────────────────────── 4. 이상징후 (룰 기반) ─────────────────────────
+@app.post("/ai/voice/summarize", dependencies=[Depends(verify_token)])
+def summarize(req: SummarizeRequest) -> dict[str, Any]:
+    ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
+    result = llm_complete_json(
+        _SUMMARIZE_SYSTEM,
+        f"어르신 컨텍스트: {ctx}\n\nSTT 기록:\n{req.stt_text}",
+        max_tokens=800,
+    )
+    if result and result.get("guardian_version"):
+        result.setdefault("categorized", {})
+        result["confidence"] = 0.9
+        result["model"] = ANTHROPIC_MODEL
+        return result
+    return _summarize_heuristic(req.stt_text)
+
+
+# ───────────────────────── 4. 이상징후 (룰 기반 실구현) ─────────────────────────
 #
 # Laravel이 어르신 7일치 데이터를 features로 추출해 보내면, 4개 위험축에 대해
 # 룰 임계값으로 점수 산정 후 가장 높은 위험 반환.
-#
-# 위험축:
-#   - nutrition  : meal_pct 평균 < 70% (3일 연속 < 50% 시 가산점)
-#   - depression : mood_score 평균 < 60 OR 7일 연속 하락
-#   - delirium   : 심박/체온 변동성 + 수면 5h 미만
-#   - fall       : BP_sys 변동 폭 > 30, 또는 BP_dia 80↑↓
-#
-# 향후 careand-ml의 IsolationForest+LSTM 앙상블로 교체 가능.
 
 class AnomalyFeatures(BaseModel):
     senior_id: int
@@ -306,7 +399,6 @@ def anomaly_score(req: AnomalyFeatures) -> dict[str, Any]:
     if score > 0:
         risks.append({"type": "fall", "score": min(score, 100), "triggers": triggers})
 
-    # 가장 높은 위험 선택
     if not risks:
         return {
             "senior_id": req.senior_id,
@@ -346,7 +438,47 @@ def anomaly_score(req: AnomalyFeatures) -> dict[str, Any]:
     }
 
 
-# ───────────────────────── 5. 챗봇 RAG ─────────────────────────
+# ───────────────────────── 5. 챗봇 (LLM + KB 폴백) ─────────────────────────
+
+_CHATBOT_SYSTEM = (
+    "너는 Care&(케어앤) 돌봄 플랫폼의 상담 챗봇이다. 장기요양보험, 재가급여, 요양보호사 매칭, "
+    "시니어 돌봄 일반에 대해 한국 기준으로 정확하고 간결하게(3~5문장) 존댓말로 답한다. "
+    "수치·제도는 확실한 경우에만 제시하고, 불확실하면 공단(1577-1000)·기관 확인을 권하라. "
+    "의료적 판단이 필요한 질문은 반드시 의료진 상담을 권하라."
+)
+
+_CHATBOT_KB = [
+    {
+        "keywords": ("등급", "한도", "본인부담", "재가급여", "급여"),
+        "title": "장기요양보험 안내",
+        "url": "https://www.longtermcare.or.kr",
+        "snippet": "장기요양 등급별 재가급여 월 한도액 및 본인부담률 안내",
+    },
+    {
+        "keywords": ("요양보호사", "자격", "교육", "방문요양"),
+        "title": "요양보호사 제도 안내",
+        "url": "https://www.mohw.go.kr",
+        "snippet": "요양보호사 자격·방문요양 서비스 안내",
+    },
+    {
+        "keywords": ("치매", "인지", "섬망"),
+        "title": "중앙치매센터",
+        "url": "https://www.nid.or.kr",
+        "snippet": "치매 단계별 돌봄 가이드",
+    },
+]
+
+
+def _kb_sources(question: str) -> list[dict[str, str]]:
+    hits = [
+        {"title": kb["title"], "url": kb["url"], "snippet": kb["snippet"]}
+        for kb in _CHATBOT_KB
+        if any(k in question for k in kb["keywords"])
+    ]
+    return hits or [
+        {"title": "장기요양보험 안내", "url": "https://www.longtermcare.or.kr", "snippet": "장기요양보험 제도 전반 안내"}
+    ]
+
 
 class ChatbotRequest(BaseModel):
     question: str
@@ -355,23 +487,25 @@ class ChatbotRequest(BaseModel):
 
 @app.post("/ai/chatbot/answer", dependencies=[Depends(verify_token)])
 def chatbot_answer(req: ChatbotRequest) -> dict[str, Any]:
+    ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
+    answer = llm_complete(_CHATBOT_SYSTEM, f"컨텍스트: {ctx}\n\n질문: {req.question}", max_tokens=600)
+    if answer:
+        return {"answer": answer, "sources": _kb_sources(req.question), "model": ANTHROPIC_MODEL}
     return {
         "answer": (
-            "장기요양 4등급 재가급여 기준 월 한도액은 1,455,800원이며, "
-            "일반 소득 기준 본인부담률은 15%로 약 218,370원입니다."
+            "지금은 AI 상담 엔진 점검 중이라 정확한 답변을 드리기 어렵습니다. "
+            "장기요양보험 관련 문의는 국민건강보험공단(1577-1000) 또는 아래 안내 자료를 참고해 주시고, "
+            "급한 문의는 Care& 고객센터로 연락해 주세요."
         ),
-        "sources": [
-            {
-                "title": "장기요양보험 안내",
-                "url": "https://www.longtermcare.or.kr",
-                "snippet": "재가급여 한도 및 본인부담률 안내",
-            }
-        ],
-        "model": "stub",
+        "sources": _kb_sources(req.question),
+        "model": "kb-fallback",
     }
 
 
-# ───────────────────────── 6. 수요 예측 ─────────────────────────
+# ───────────────────────── 6. 수요 예측 (실구현: 요일 계절성) ─────────────────────────
+#
+# match_requests 최근 56일 일별 건수 → 요일별 평균(seasonal naive)으로 향후 N일 예측.
+# 데이터가 희소한 요일은 전체 일평균으로 보간. available_caregivers는 활성 인력 실측.
 
 class ForecastRequest(BaseModel):
     region: str = "서울"
@@ -380,21 +514,76 @@ class ForecastRequest(BaseModel):
 
 @app.post("/ai/forecast/demand", dependencies=[Depends(verify_token)])
 def forecast_demand(req: ForecastRequest) -> dict[str, Any]:
+    days = max(1, min(req.days, 30))
+    lookback = 56
+    conn = get_db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DATE(created_at) AS d, COUNT(*) AS cnt
+                FROM match_requests
+                WHERE created_at >= CURDATE() - INTERVAL %s DAY
+                GROUP BY DATE(created_at)
+                """,
+                (lookback,),
+            )
+            rows = cur.fetchall()
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM caregivers WHERE status = 'active' AND deleted_at IS NULL"
+            )
+            active_caregivers = cur.fetchone()["c"]
+    finally:
+        conn.close()
+
+    counts_by_date = {r["d"]: int(r["cnt"]) for r in rows}
+    today = date.today()
+    # lookback 전 구간을 0 포함 일별 시계열로 펼침 (요청 없던 날 = 0건)
+    start = today - timedelta(days=lookback)
+    weekday_counts: dict[int, list[int]] = {i: [] for i in range(7)}
+    total: list[int] = []
+    for i in range(lookback):
+        d = start + timedelta(days=i)
+        c = counts_by_date.get(d, 0)
+        weekday_counts[d.weekday()].append(c)
+        total.append(c)
+
+    overall_avg = sum(total) / len(total) if total else 0.0
+    weekday_avg = {
+        wd: (sum(v) / len(v) if v else overall_avg) for wd, v in weekday_counts.items()
+    }
+
     forecasts = []
-    for i in range(req.days):
+    for i in range(1, days + 1):
+        d = today + timedelta(days=i)
+        pred = weekday_avg.get(d.weekday(), overall_avg)
         forecasts.append(
             {
-                "date": f"2026-05-{4 + i:02d}",
-                "predicted_requests": 187 - i * 5,
-                "available_caregivers": 42 + i * 2,
+                "date": d.isoformat(),
+                "predicted_requests": round(pred, 1),
+                "available_caregivers": active_caregivers,
             }
         )
-    return {"region": req.region, "forecasts": forecasts, "model": "stub"}
+
+    return {
+        "region": req.region,
+        "forecasts": forecasts,
+        "history_days": lookback,
+        "history_total_requests": sum(total),
+        "model": "seasonal-naive-v1",
+    }
 
 
-# ───────────── 7. 백엔드 호환 엔드포인트 (산후조리 도메인) ─────────────
-# careand-backend(Laravel) PostpartumChatbotController / PostpartumMatchingController가
-# 호출하는 계약에 맞춘 어댑터. 내부 구현은 stub 단계.
+# ───────────── 7. 산후조리 챗봇 (LLM + 룰 폴백) ─────────────
+
+_POSTPARTUM_SYSTEM = (
+    "너는 Care&의 산후조리 전문 상담 챗봇이다. 산모의 회복, 모유수유, 신생아 돌봄에 대해 "
+    "한국 산후조리 표준에 맞춰 따뜻한 존댓말로 답한다(4~6문장). "
+    "산모 컨텍스트(출산 후 경과일, 초산 여부, 수유 방식)를 반영하라. "
+    "발열·출혈·통증 악화 등 위험 신호가 언급되면 즉시 의료진 진료를 최우선으로 권하라. "
+    "확실하지 않은 의학 정보는 단정하지 마라."
+)
+
 
 class PostpartumChatMessage(BaseModel):
     role: str = "user"
@@ -408,9 +597,7 @@ class PostpartumChatRequest(BaseModel):
     context: dict[str, Any] = {}
 
 
-@app.post("/chatbot/postpartum", dependencies=[Depends(verify_token)])
-def chatbot_postpartum(req: PostpartumChatRequest) -> dict[str, Any]:
-    """산후조리 챗봇 RAG (stub). 응답 형식 {answer, sources}는 백엔드 기대와 일치."""
+def _postpartum_rule_answer(req: PostpartumChatRequest) -> str:
     ctx = req.context or {}
     days = ctx.get("days_since_delivery", 0)
     first = ctx.get("is_first_baby", True)
@@ -426,11 +613,26 @@ def chatbot_postpartum(req: PostpartumChatRequest) -> dict[str, Any]:
     if not tips:
         tips.append("산모님의 회복 상태에 맞춘 영양·수면 관리가 필요합니다.")
 
-    answer = (
+    return (
         f"문의 주신 \"{req.user_message}\"에 대해 안내드립니다. "
         + " ".join(tips)
         + " 증상이 지속되면 담당 의료진과 상담하시기 바랍니다."
     )
+
+
+@app.post("/chatbot/postpartum", dependencies=[Depends(verify_token)])
+def chatbot_postpartum(req: PostpartumChatRequest) -> dict[str, Any]:
+    """산후조리 챗봇. 응답 형식 {answer, sources}는 백엔드 기대와 일치."""
+    history_txt = "\n".join(f"{m.role}: {m.content}" for m in req.history[-6:]) or "없음"
+    ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
+    answer = llm_complete(
+        _POSTPARTUM_SYSTEM,
+        f"산모 컨텍스트: {ctx}\n\n대화 이력:\n{history_txt}\n\n산모 질문: {req.user_message}",
+        max_tokens=700,
+    )
+    model = ANTHROPIC_MODEL if answer else "rule-fallback"
+    if not answer:
+        answer = _postpartum_rule_answer(req)
 
     return {
         "answer": answer,
@@ -441,9 +643,11 @@ def chatbot_postpartum(req: PostpartumChatRequest) -> dict[str, Any]:
                 "snippet": "산후 회복 및 신생아 돌봄 표준 안내",
             }
         ],
-        "model": "stub",
+        "model": model,
     }
 
+
+# ───────────── 8. 산후조리 매칭 (룰 기반 실구현, DB 직결) ─────────────
 
 class PostpartumMatchRequest(BaseModel):
     match_request_id: int | None = None
@@ -583,7 +787,7 @@ def matching_postpartum(req: PostpartumMatchRequest) -> dict[str, Any]:
     }
 
 
-# ───────────── 8. C:Writer 케어 일지 생성 (#28 LLM 일지) ─────────────
+# ───────────── 9. C:Writer 케어 일지 생성 (LLM + 템플릿 폴백) ─────────────
 
 class CareActivity(BaseModel):
     category: str = "other"
@@ -603,14 +807,15 @@ _CATEGORY_LABEL = {
     "mood": "정서", "cognition": "인지", "other": "기타",
 }
 
+_CARELOG_SYSTEM = (
+    "너는 시니어 돌봄 플랫폼의 케어 일지 작성 도우미다. 요양보호사가 기록한 활동 목록을 받아 "
+    "보호자용(따뜻한 존댓말, 3~4문장)과 의료진용(간결한 임상 요약) 일지를 작성한다. "
+    "출력 JSON 스키마: {\"guardian_version\": str, \"medical_version\": str}. "
+    "기록에 없는 활동·상태를 지어내지 마라. 어르신 호칭은 입력된 이름을 그대로 쓴다."
+)
 
-@app.post("/care-log/generate", dependencies=[Depends(verify_token)])
-def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
-    """STT/활동 기록 → 도메인별 보호자 톤 일지 자동 생성 (stub LLM).
 
-    실제 운영에서는 Whisper STT 텍스트 + Claude API로 대체.
-    """
-    # 활동을 카테고리별로 그룹화
+def _care_log_template(req: CareLogRequest) -> dict[str, Any]:
     grouped: dict[str, list[str]] = {}
     for a in req.activities:
         label = _CATEGORY_LABEL.get(a.category, a.category)
@@ -642,6 +847,39 @@ def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
         "guardian_version": guardian_version,
         "medical_version": medical_version,
         "categorized": grouped,
-        "confidence": 0.9,
-        "model": "stub-claude",
+        "confidence": 0.8,
+        "model": "template-v1",
     }
+
+
+@app.post("/care-log/generate", dependencies=[Depends(verify_token)])
+def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
+    """활동 기록 → 보호자/의료진용 일지 생성. LLM 우선, 실패 시 템플릿."""
+    grouped: dict[str, list[str]] = {}
+    for a in req.activities:
+        label = _CATEGORY_LABEL.get(a.category, a.category)
+        grouped.setdefault(label, [])
+        if a.memo:
+            grouped[label].append(a.memo)
+
+    if req.activities and llm_available():
+        acts = "\n".join(
+            f"- [{_CATEGORY_LABEL.get(a.category, a.category)}] {a.memo or '수행함(메모 없음)'}"
+            for a in req.activities
+        )
+        result = llm_complete_json(
+            _CARELOG_SYSTEM,
+            f"어르신: {req.senior_name}\n돌봄 시간: {req.duration_min}분\n"
+            f"도메인: {req.service_domain or '-'}\n활동 기록:\n{acts}",
+            max_tokens=800,
+        )
+        if result and result.get("guardian_version") and result.get("medical_version"):
+            return {
+                "guardian_version": result["guardian_version"],
+                "medical_version": result["medical_version"],
+                "categorized": grouped,
+                "confidence": 0.92,
+                "model": ANTHROPIC_MODEL,
+            }
+
+    return _care_log_template(req)

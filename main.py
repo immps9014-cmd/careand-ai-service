@@ -26,6 +26,8 @@ import json
 import logging
 import math
 import os
+import tempfile
+import threading
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
@@ -151,7 +153,7 @@ def health() -> dict[str, Any]:
         "phase": "v0.2 실구현",
         "models": {
             "matching": "rule-v1",
-            "stt": "stub",
+            "stt": f"faster-whisper-{WHISPER_MODEL_NAME}-int8 (lazy)",
             "llm": llm_state,
             "anomaly": "rule-v1",
             "forecast": "seasonal-naive-v1",
@@ -249,7 +251,59 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
     return {"candidates": top, "scoring_method": "rule-v1"}
 
 
-# ───────────────────────── 2. STT (미구현 — 정직한 stub) ─────────────────────────
+# ───────────────────────── 2. STT (faster-whisper 실구현) ─────────────────────────
+#
+# CPU(int8) 추론. 박스 RAM이 빠듯하므로(가용 ~1.7G) 기본 모델은 base.
+# WHISPER_MODEL env로 small 등 상향 가능. 모델은 첫 호출 시 lazy 로드(이후 상주),
+# 추론은 락으로 직렬화(2코어 박스에서 동시 추론 방지).
+
+WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
+WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "2"))
+_AUDIO_MAX_BYTES = 50 * 1024 * 1024
+
+_whisper_model = None
+_whisper_load_lock = threading.Lock()
+_whisper_infer_lock = threading.Lock()
+
+
+def _get_whisper():
+    global _whisper_model
+    if _whisper_model is None:
+        with _whisper_load_lock:
+            if _whisper_model is None:
+                from faster_whisper import WhisperModel
+
+                logger.info("Whisper 모델 로드 시작: %s (int8, threads=%d)", WHISPER_MODEL_NAME, WHISPER_THREADS)
+                _whisper_model = WhisperModel(
+                    WHISPER_MODEL_NAME,
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=WHISPER_THREADS,
+                    download_root=os.path.join(os.path.dirname(__file__), "models"),
+                )
+                logger.info("Whisper 모델 로드 완료")
+    return _whisper_model
+
+
+def _fetch_audio(audio_url: str) -> tuple[str, bool]:
+    """audio_url → 로컬 파일 경로. (경로, 임시파일 여부) 반환."""
+    if audio_url.startswith(("http://", "https://")):
+        suffix = os.path.splitext(audio_url.split("?")[0])[1] or ".audio"
+        req = urllib.request.Request(audio_url, headers={"User-Agent": "careand-ai/0.2"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read(_AUDIO_MAX_BYTES + 1)
+        if len(data) > _AUDIO_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="audio file too large (>50MB)")
+        if not data:
+            raise HTTPException(status_code=422, detail="empty audio file")
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp.write(data)
+        tmp.close()
+        return tmp.name, True
+    if os.path.isfile(audio_url):
+        return audio_url, False
+    raise HTTPException(status_code=422, detail=f"audio_url not reachable: {audio_url[:120]}")
+
 
 class TranscribeRequest(BaseModel):
     audio_url: str
@@ -258,13 +312,46 @@ class TranscribeRequest(BaseModel):
 
 @app.post("/ai/voice/transcribe", dependencies=[Depends(verify_token)])
 def transcribe(req: TranscribeRequest) -> dict[str, Any]:
-    """STT 엔진 미도입 — Whisper 등 도입 전까지 stub 유지 (model 필드로 식별)."""
+    """음성 → 텍스트 (faster-whisper, CPU int8).
+
+    실패 시 가짜 텍스트를 반환하지 않고 5xx로 응답한다
+    (오인식 일지가 보호자에게 나가는 것 방지 — 호출측이 실패 처리).
+    """
+    path, is_tmp = _fetch_audio(req.audio_url)
+    try:
+        model = _get_whisper()
+        with _whisper_infer_lock:
+            segments, info = model.transcribe(
+                path,
+                language=req.language or "ko",
+                vad_filter=True,
+            )
+            seg_list = list(segments)  # generator 소진 (락 안에서)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("STT 실패: %s", e)
+        raise HTTPException(status_code=502, detail=f"STT engine error: {e}")
+    finally:
+        if is_tmp:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    text = " ".join(s.text.strip() for s in seg_list).strip()
+    if seg_list:
+        avg_lp = sum(s.avg_logprob for s in seg_list) / len(seg_list)
+        confidence = round(max(0.0, min(math.exp(avg_lp), 1.0)), 3)
+    else:
+        confidence = 0.0
+
     return {
-        "stt_text": "오늘 어머님 점심 반 그릇 드시고, 산책 30분 하셨고, 혈압 정상이었어요. 기분도 좋아 보이셨어요.",
-        "confidence": 0.948,
-        "duration_sec": 47,
-        "language": req.language,
-        "model": "stub",
+        "stt_text": text,
+        "confidence": confidence,
+        "duration_sec": round(info.duration, 1),
+        "language": info.language,
+        "model": f"faster-whisper-{WHISPER_MODEL_NAME}-int8",
     }
 
 

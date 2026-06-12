@@ -152,7 +152,7 @@ def health() -> dict[str, Any]:
         "service": "careand-ai-service",
         "phase": "v0.2 실구현",
         "models": {
-            "matching": "rule-v1",
+            "matching": "rule-v2",
             "stt": f"faster-whisper-{WHISPER_MODEL_LABEL}-int8 (lazy)",
             "llm": llm_state,
             "anomaly": "rule-v1",

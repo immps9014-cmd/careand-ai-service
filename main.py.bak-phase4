@@ -186,8 +186,6 @@ class MatchRecommendRequest(BaseModel):
     caregivers: list[CaregiverFeature]
     top_k: int = 5
     min_score: float = 0.0
-    service_domain: str = "senior"      # senior|postpartum|nursing|housekeeping
-    required_skills: list[str] = []     # 미보유 인력은 후보에서 하드 제외
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -199,15 +197,7 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * R * math.asin(math.sqrt(a))
 
 
-# 도메인별 가중치 (특기, 거리, 평점, 경험) — 가사는 근접성이 더 중요
-_DOMAIN_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
-    "senior": (0.4, 0.3, 0.2, 0.1),
-    "nursing": (0.4, 0.3, 0.2, 0.1),
-    "housekeeping": (0.3, 0.4, 0.2, 0.1),
-}
-
-
-def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str = "senior") -> tuple[float, list[str]]:
+def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature) -> tuple[float, list[str]]:
     diseases = set(senior.get("diseases") or [])
     specialties = set(cg.specialties or [])
     senior_lat = senior.get("lat")
@@ -231,8 +221,7 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str =
     rating_score = max(0.0, min(cg.rating_avg / 5.0, 1.0))
     exp_score = min(cg.completed_sessions / 100.0, 1.0)
 
-    w_spec, w_dist, w_rate, w_exp = _DOMAIN_WEIGHTS.get(domain, _DOMAIN_WEIGHTS["senior"])
-    final = w_spec * specialty_score + w_dist * distance_score + w_rate * rating_score + w_exp * exp_score
+    final = 0.4 * specialty_score + 0.3 * distance_score + 0.2 * rating_score + 0.1 * exp_score
 
     reasons = []
     if matched:
@@ -248,13 +237,9 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str =
 
 @app.post("/ai/match/recommend", dependencies=[Depends(verify_token)])
 def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
-    required = set(req.required_skills or [])
     scored = []
     for cg in req.caregivers:
-        # 필수 스킬 하드 필터 — 수리 요청에 청소 인력 차단 (백엔드 풀 필터의 이중 방어)
-        if required and not required <= set(cg.specialties or []):
-            continue
-        score, reasons = _score_caregiver(req.senior, cg, req.service_domain)
+        score, reasons = _score_caregiver(req.senior, cg)
         if score >= req.min_score:
             scored.append({"caregiver_id": cg.id, "score": score, "reasons": reasons})
 
@@ -263,7 +248,7 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
     for i, c in enumerate(top, start=1):
         c["rank"] = i
 
-    return {"candidates": top, "scoring_method": "rule-v2"}
+    return {"candidates": top, "scoring_method": "rule-v1"}
 
 
 # ───────────────────────── 2. STT (faster-whisper 실구현) ─────────────────────────

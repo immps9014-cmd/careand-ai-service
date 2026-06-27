@@ -181,6 +181,7 @@ class CaregiverFeature(BaseModel):
     lat: float | None = None
     lng: float | None = None
     prior_matches: int = 0              # 이 대상자를 과거에 맡았던 횟수 (연속성 신호)
+    gender: str | None = None          # M|F (성별선호 매칭용)
 
 
 class MatchRecommendRequest(BaseModel):
@@ -191,6 +192,7 @@ class MatchRecommendRequest(BaseModel):
     min_score: float = 0.0
     service_domain: str = "senior"      # senior|postpartum|nursing|housekeeping
     required_skills: list[str] = []     # 미보유 인력은 후보에서 하드 제외
+    preferred_gender: str | None = None # M|F — 지정 시 일치 인력에 소프트 가산
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -215,9 +217,10 @@ _RATING_PRIOR_COUNT = 5
 # 연속성(재돌봄): 동일 대상자 N회 이상 담당이면 만점, 기존 점수에 가산하는 가중치
 _CONTINUITY_SATURATION = 3.0
 _CONTINUITY_WEIGHT = 0.15
+# 성별선호: 지정 시 일치 인력을 정렬에서 우선(파티션). 미일치는 폴백으로 후순위 유지.
 
 
-def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str = "senior") -> tuple[float, list[str]]:
+def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str = "senior", preferred_gender: str | None = None) -> tuple[float, list[str]]:
     diseases = set(senior.get("diseases") or [])
     specialties = set(cg.specialties or [])
     senior_lat = senior.get("lat")
@@ -253,11 +256,17 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str =
     continuity_score = min(cg.prior_matches / _CONTINUITY_SATURATION, 1.0) if cg.prior_matches > 0 else 0.0
     final = (1.0 - _CONTINUITY_WEIGHT) * base + _CONTINUITY_WEIGHT * continuity_score
 
+    # 성별선호는 점수가 아니라 "정렬 우선순위(파티션)"로 처리한다(match_recommend에서).
+    # 점수 미세가산으로는 소수 성별(예: 남성 2명)을 상위로 올리지 못해 선호가 사실상 무력화되기 때문.
+    gender_matched = bool(preferred_gender and cg.gender == preferred_gender)
+
     reasons = []
     if matched:
         reasons.append(f"특기 일치: {', '.join(sorted(matched))}")
     if cg.prior_matches > 0:
         reasons.append(f"단골 — 이전 돌봄 {cg.prior_matches}회")
+    if gender_matched:
+        reasons.append("선호 성별 일치")
     if dist_km is not None:
         reasons.append(f"거리 {dist_km:.1f}km")
     if n > 0:
@@ -271,19 +280,29 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str =
 @app.post("/ai/match/recommend", dependencies=[Depends(verify_token)])
 def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
     required = set(req.required_skills or [])
+    pref = req.preferred_gender
     scored = []
     for cg in req.caregivers:
         # 필수 스킬 하드 필터 — 수리 요청에 청소 인력 차단 (백엔드 풀 필터의 이중 방어)
         if required and not required <= set(cg.specialties or []):
             continue
-        score, reasons = _score_caregiver(req.senior, cg, req.service_domain)
-        if score >= req.min_score:
-            scored.append({"caregiver_id": cg.id, "score": score, "reasons": reasons})
+        score, reasons = _score_caregiver(req.senior, cg, req.service_domain, pref)
+        gender_pref = 1 if (pref and cg.gender == pref) else 0
+        # 선호 성별 인력은 보호자가 명시적으로 원한 대상이므로 점수 임계(min_score)를 우회해 항상 포함.
+        # (그렇지 않으면 base 낮은 소수 성별이 임계에서 탈락해 선호가 무력화됨)
+        if score >= req.min_score or gender_pref:
+            scored.append({"caregiver_id": cg.id, "score": score, "reasons": reasons, "_gp": gender_pref})
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
+    # 선호 성별 지정 시: 일치 인력을 우선(파티션) → 그 안에서 점수순. 미지정 시: 순수 점수순.
+    # 일치 인력이 top_k보다 적으면 미일치 인력이 자연스레 폴백으로 채워진다(빈 결과 방지).
+    if pref:
+        scored.sort(key=lambda x: (x["_gp"], x["score"]), reverse=True)
+    else:
+        scored.sort(key=lambda x: x["score"], reverse=True)
     top = scored[: req.top_k]
     for i, c in enumerate(top, start=1):
         c["rank"] = i
+        c.pop("_gp", None)
 
     return {"candidates": top, "scoring_method": "rule-v3"}
 

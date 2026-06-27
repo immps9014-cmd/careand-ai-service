@@ -307,6 +307,53 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
     return {"candidates": top, "scoring_method": "rule-v3"}
 
 
+# ───────────── 가성비 재랭킹 (역경매 입찰 반영) ─────────────
+#
+# 후보 생성 시점엔 입찰가가 없으므로, 보호자 조회 시점에 입찰가 대비 가성비를
+# AI 매칭 점수에 소프트 가산해 "추천순"을 보정한다. 적합도(ai_score)가 비슷한
+# 후보 간 가격 경쟁력으로 타이브레이크하되, 적합도를 뒤집을 만큼 크지는 않게(W_PRICE 작게).
+
+_W_PRICE = float(os.environ.get("AI_W_PRICE", "0.10"))   # 가성비 가중(작게 — 소프트 보정)
+_VFM_CHEAP_CAP = 0.15    # 권장가 대비 저렴 보너스 상한
+_VFM_PRICEY_CAP = -0.10  # 권장가 대비 비쌈 페널티 하한
+
+
+class ValueRankItem(BaseModel):
+    candidate_id: int
+    ai_score: float
+    bid_hourly: float | None = None
+
+
+class ValueRankRequest(BaseModel):
+    suggested: float                 # 적정가(권장 시급)
+    items: list[ValueRankItem]
+
+
+def _value_for_money(ai_score: float, bid: float | None, suggested: float) -> tuple[float, str | None]:
+    """입찰가 대비 가성비를 ai_score에 소프트 가산. (value_score, reason) 반환."""
+    if bid is None or suggested <= 0:
+        return ai_score, None
+    # 권장가보다 저렴할수록 +, 비쌀수록 - (비대칭 클램프)
+    vfm = max(_VFM_PRICEY_CAP, min((suggested - bid) / suggested, _VFM_CHEAP_CAP))
+    value_score = ai_score + _W_PRICE * vfm
+    reason = None
+    if vfm >= 0.05:
+        reason = "가성비 좋음"
+    elif vfm <= -0.05:
+        reason = "권장가 대비 높음"
+    return value_score, reason
+
+
+@app.post("/matching/value-rank", dependencies=[Depends(verify_token)])
+def value_rank(req: ValueRankRequest) -> dict[str, Any]:
+    ranked = []
+    for it in req.items:
+        vs, reason = _value_for_money(it.ai_score, it.bid_hourly, req.suggested)
+        ranked.append({"candidate_id": it.candidate_id, "value_score": round(vs, 4), "reason": reason})
+    ranked.sort(key=lambda x: x["value_score"], reverse=True)
+    return {"ranked": ranked, "scoring_method": "value-v1", "w_price": _W_PRICE}
+
+
 # ───────────────────────── 2. STT (faster-whisper 실구현) ─────────────────────────
 #
 # CPU(int8) 추론. 박스 RAM이 빠듯하므로(가용 ~1.7G) 기본 모델은 base.

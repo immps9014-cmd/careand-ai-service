@@ -152,7 +152,7 @@ def health() -> dict[str, Any]:
         "service": "careand-ai-service",
         "phase": "v0.2 실구현",
         "models": {
-            "matching": "rule-v2",
+            "matching": "rule-v3",
             "stt": f"faster-whisper-{WHISPER_MODEL_LABEL}-int8 (lazy)",
             "llm": llm_state,
             "anomaly": "rule-v1",
@@ -162,9 +162,10 @@ def health() -> dict[str, Any]:
     }
 
 
-# ───────────────────────── 1. 매칭 추천 (룰 기반 실구현) ─────────────────────────
+# ───────────────────────── 1. 매칭 추천 (룰 기반 실구현, rule-v3) ─────────────────────────
 #
-# 점수 = 0.4 * 특기일치  +  0.3 * 거리점수  +  0.2 * 평점점수  +  0.1 * 경험점수
+# base = w_특기*특기일치 + w_거리*거리점수 + w_평점*평점점수(베이지안) + w_경험*경험점수
+# final = 0.85 * base + 0.15 * 연속성점수   (연속성=동일 대상자 재돌봄 이력, 가산식이라 무이력 시 랭킹 보존)
 #  - 특기일치: 어르신 질환↔인력 특기 교집합 비율 (0~1)
 #  - 거리점수: max(0, 1 - dist_km/10) (10km 안에서만 양의 점수)
 #  - 평점점수: rating_avg / 5.0
@@ -175,9 +176,11 @@ class CaregiverFeature(BaseModel):
     id: int
     specialties: list[str] = []
     rating_avg: float = 0.0
+    rating_count: int = 0                # 평점 표본 수 (베이지안 보정용)
     completed_sessions: int = 0
     lat: float | None = None
     lng: float | None = None
+    prior_matches: int = 0              # 이 대상자를 과거에 맡았던 횟수 (연속성 신호)
 
 
 class MatchRecommendRequest(BaseModel):
@@ -206,6 +209,13 @@ _DOMAIN_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
     "housekeeping": (0.3, 0.4, 0.2, 0.1),
 }
 
+# 평점 베이지안 보정: 표본 적은 평점이 과대평가되지 않도록 중립 사전(3.5)에 가상표본 5건을 섞음
+_RATING_PRIOR_MEAN = 3.5
+_RATING_PRIOR_COUNT = 5
+# 연속성(재돌봄): 동일 대상자 N회 이상 담당이면 만점, 기존 점수에 가산하는 가중치
+_CONTINUITY_SATURATION = 3.0
+_CONTINUITY_WEIGHT = 0.15
+
 
 def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str = "senior") -> tuple[float, list[str]]:
     diseases = set(senior.get("diseases") or [])
@@ -228,18 +238,30 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str =
         dist_km = None
         distance_score = 0.5
 
-    rating_score = max(0.0, min(cg.rating_avg / 5.0, 1.0))
+    # 평점: 베이지안 보정 — 표본이 적은 신규/단발 평점이 과대평가되지 않도록
+    # 중립 사전평균에 가상표본을 섞는다 (rating_count=0이면 사전평균에 수렴).
+    n = max(0, cg.rating_count)
+    bayes_rating = (_RATING_PRIOR_COUNT * _RATING_PRIOR_MEAN + n * cg.rating_avg) / (_RATING_PRIOR_COUNT + n)
+    rating_score = max(0.0, min(bayes_rating / 5.0, 1.0))
     exp_score = min(cg.completed_sessions / 100.0, 1.0)
 
     w_spec, w_dist, w_rate, w_exp = _DOMAIN_WEIGHTS.get(domain, _DOMAIN_WEIGHTS["senior"])
-    final = w_spec * specialty_score + w_dist * distance_score + w_rate * rating_score + w_exp * exp_score
+    base = w_spec * specialty_score + w_dist * distance_score + w_rate * rating_score + w_exp * exp_score
+
+    # 연속성(재돌봄): 동일 대상자를 맡았던 이력은 강한 선호 신호 → 기존 점수에 가산.
+    # 가산 방식이므로 이력이 없으면(continuity=0) 기존 랭킹이 보존된다.
+    continuity_score = min(cg.prior_matches / _CONTINUITY_SATURATION, 1.0) if cg.prior_matches > 0 else 0.0
+    final = (1.0 - _CONTINUITY_WEIGHT) * base + _CONTINUITY_WEIGHT * continuity_score
 
     reasons = []
     if matched:
         reasons.append(f"특기 일치: {', '.join(sorted(matched))}")
+    if cg.prior_matches > 0:
+        reasons.append(f"단골 — 이전 돌봄 {cg.prior_matches}회")
     if dist_km is not None:
         reasons.append(f"거리 {dist_km:.1f}km")
-    reasons.append(f"평점 {cg.rating_avg:.2f}/5")
+    if n > 0:
+        reasons.append(f"평점 {cg.rating_avg:.2f}/5 ({n}건)")
     if cg.completed_sessions >= 50:
         reasons.append(f"경력 {cg.completed_sessions}회")
 
@@ -263,7 +285,7 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
     for i, c in enumerate(top, start=1):
         c["rank"] = i
 
-    return {"candidates": top, "scoring_method": "rule-v2"}
+    return {"candidates": top, "scoring_method": "rule-v3"}
 
 
 # ───────────────────────── 2. STT (faster-whisper 실구현) ─────────────────────────

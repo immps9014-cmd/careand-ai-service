@@ -1,0 +1,15 @@
+=== [1/3] small 모델 로드 검증 + base vs small 비교 (동일 오디오) ===
+[base] elapsed=2.1s conf=0.623 audio_dur=19.3s
+    TEXT: 정 할아버지 직사 잘 하셨구요 보기하셨습니다 30분정도 공원에 가서 운동을 하셨구요 목욕까지 완료하셨어요
+[small] elapsed=5.3s conf=0.624 audio_dur=19.3s
+    TEXT: 정 할아버지 체크사장 하셨고요 복약 되셨습니다 30분 정도 공원에 가서 운동을 하셨고요 목욕까지 완료하셨어요
+LOAD_OK
+
+=== [2/3] .env 적용: WHISPER_MODEL -> small-ct2 ===
+WHISPER_MODEL=/root/careand-ai-service/models/small-ct2
+
+=== [3/3] careand-ai 재시작 + 스모크 ===
+active=active
+smoke STT(small):
+{"stt_text":"정 할아버지 체크사장 하셨고요 복약 되셨습니다 30분 정도 공원에 가서 운동을 하셨고요 목욕까지 완료하셨어요","confidence":0.624,"duration_sec":19.3,"language":"ko","model":"faster-whisper-small-ct2-int8"}
+=== DONE ===

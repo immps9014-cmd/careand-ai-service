@@ -1,0 +1,8 @@
+# L2R 매칭(l2r.py / train_l2r.py) 전용 의존성.
+# Kakao PyPI 미러(ftp.daumkakao.com)에서 설치 가능. HuggingFace/torch는 불필요(경량 모델).
+#   ./venv/bin/pip install -r requirements-ml.txt
+numpy==2.0.2
+scipy==1.13.1
+scikit-learn==1.6.1
+joblib==1.5.3
+threadpoolctl==3.6.0

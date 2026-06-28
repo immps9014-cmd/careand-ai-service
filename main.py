@@ -37,6 +37,8 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+import l2r  # 매칭 feature·룰점수·L2R 모델 게이팅의 단일 소스
+
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 EXPECTED_TOKEN = os.environ.get("AI_SERVICE_TOKEN", "")
@@ -152,7 +154,7 @@ def health() -> dict[str, Any]:
         "service": "careand-ai-service",
         "phase": "v0.2 실구현",
         "models": {
-            "matching": "rule-v3",
+            "matching": l2r.method_tag(),
             "stt": f"faster-whisper-{WHISPER_MODEL_LABEL}-int8 (lazy)",
             "llm": llm_state,
             "anomaly": "rule-v1",
@@ -160,6 +162,12 @@ def health() -> dict[str, Any]:
             "rag": llm_state,
         },
     }
+
+
+@app.get("/ai/match/l2r-status", dependencies=[Depends(verify_token)])
+def l2r_status() -> dict[str, Any]:
+    """L2R 게이트/모델 상태 점검(운영용). active=false면 rule-v3로 동작 중."""
+    return l2r.status()
 
 
 # ───────────────────────── 1. 매칭 추천 (룰 기반 실구현, rule-v3) ─────────────────────────
@@ -195,86 +203,33 @@ class MatchRecommendRequest(BaseModel):
     preferred_gender: str | None = None # M|F — 지정 시 일치 인력에 소프트 가산
 
 
-def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    """두 좌표 사이 거리 (km)."""
-    R = 6371.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp, dl = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(a))
-
-
-# 도메인별 가중치 (특기, 거리, 평점, 경험) — 가사는 근접성이 더 중요
-_DOMAIN_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
-    "senior": (0.4, 0.3, 0.2, 0.1),
-    "nursing": (0.4, 0.3, 0.2, 0.1),
-    "housekeeping": (0.3, 0.4, 0.2, 0.1),
-}
-
-# 평점 베이지안 보정: 표본 적은 평점이 과대평가되지 않도록 중립 사전(3.5)에 가상표본 5건을 섞음
-_RATING_PRIOR_MEAN = 3.5
-_RATING_PRIOR_COUNT = 5
-# 연속성(재돌봄): 동일 대상자 N회 이상 담당이면 만점, 기존 점수에 가산하는 가중치
-_CONTINUITY_SATURATION = 3.0
-_CONTINUITY_WEIGHT = 0.15
-# 성별선호: 지정 시 일치 인력을 정렬에서 우선(파티션). 미일치는 폴백으로 후순위 유지.
+# 서브점수/거리/가중치/베이지안/연속성 상수는 모두 l2r.py(단일 소스)로 이전됨.
+# rule-v3 = l2r.rule_score, L2R 블렌딩(데이터 임계 미달 시 룰 폴백) = l2r.blended_score.
+# 성별선호는 점수가 아니라 정렬 파티션(match_recommend)으로 처리한다 — 점수 미세가산으로는
+# 소수 성별(예: 남성 2명)을 상위로 못 올려 선호가 무력화되기 때문.
 
 
 def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str = "senior", preferred_gender: str | None = None) -> tuple[float, list[str]]:
-    diseases = set(senior.get("diseases") or [])
-    specialties = set(cg.specialties or [])
-    senior_lat = senior.get("lat")
-    senior_lng = senior.get("lng")
+    """rule-v3 서브점수(l2r 단일 소스) → L2R 블렌딩 점수 + 사람용 reasons.
+    모델 비활성(데이터 임계 미달)이면 blended_score가 순수 rule-v3로 자동 폴백한다."""
+    sub = l2r.subscores(senior, cg, domain, preferred_gender)
+    score = l2r.blended_score(sub, domain)
 
-    matched = diseases & specialties
-    if not diseases:
-        specialty_score = 0.5
-    elif matched:
-        specialty_score = min(len(matched) / len(diseases), 1.0)
-    else:
-        specialty_score = 0.3
-
-    if senior_lat is not None and senior_lng is not None and cg.lat is not None and cg.lng is not None:
-        dist_km = _haversine_km(senior_lat, senior_lng, cg.lat, cg.lng)
-        distance_score = max(0.0, 1.0 - dist_km / 10.0)
-    else:
-        dist_km = None
-        distance_score = 0.5
-
-    # 평점: 베이지안 보정 — 표본이 적은 신규/단발 평점이 과대평가되지 않도록
-    # 중립 사전평균에 가상표본을 섞는다 (rating_count=0이면 사전평균에 수렴).
-    n = max(0, cg.rating_count)
-    bayes_rating = (_RATING_PRIOR_COUNT * _RATING_PRIOR_MEAN + n * cg.rating_avg) / (_RATING_PRIOR_COUNT + n)
-    rating_score = max(0.0, min(bayes_rating / 5.0, 1.0))
-    exp_score = min(cg.completed_sessions / 100.0, 1.0)
-
-    w_spec, w_dist, w_rate, w_exp = _DOMAIN_WEIGHTS.get(domain, _DOMAIN_WEIGHTS["senior"])
-    base = w_spec * specialty_score + w_dist * distance_score + w_rate * rating_score + w_exp * exp_score
-
-    # 연속성(재돌봄): 동일 대상자를 맡았던 이력은 강한 선호 신호 → 기존 점수에 가산.
-    # 가산 방식이므로 이력이 없으면(continuity=0) 기존 랭킹이 보존된다.
-    continuity_score = min(cg.prior_matches / _CONTINUITY_SATURATION, 1.0) if cg.prior_matches > 0 else 0.0
-    final = (1.0 - _CONTINUITY_WEIGHT) * base + _CONTINUITY_WEIGHT * continuity_score
-
-    # 성별선호는 점수가 아니라 "정렬 우선순위(파티션)"로 처리한다(match_recommend에서).
-    # 점수 미세가산으로는 소수 성별(예: 남성 2명)을 상위로 올리지 못해 선호가 사실상 무력화되기 때문.
-    gender_matched = bool(preferred_gender and cg.gender == preferred_gender)
-
-    reasons = []
-    if matched:
-        reasons.append(f"특기 일치: {', '.join(sorted(matched))}")
-    if cg.prior_matches > 0:
-        reasons.append(f"단골 — 이전 돌봄 {cg.prior_matches}회")
-    if gender_matched:
+    reasons: list[str] = []
+    if sub["_matched"]:
+        reasons.append(f"특기 일치: {', '.join(sorted(sub['_matched']))}")
+    if sub["_prior"] > 0:
+        reasons.append(f"단골 — 이전 돌봄 {sub['_prior']}회")
+    if sub["gender_match"]:
         reasons.append("선호 성별 일치")
-    if dist_km is not None:
-        reasons.append(f"거리 {dist_km:.1f}km")
-    if n > 0:
-        reasons.append(f"평점 {cg.rating_avg:.2f}/5 ({n}건)")
-    if cg.completed_sessions >= 50:
-        reasons.append(f"경력 {cg.completed_sessions}회")
+    if sub["_dist_km"] is not None:
+        reasons.append(f"거리 {sub['_dist_km']:.1f}km")
+    if sub["_n"] > 0:
+        reasons.append(f"평점 {cg.rating_avg:.2f}/5 ({sub['_n']}건)")
+    if sub["_sessions"] >= 50:
+        reasons.append(f"경력 {sub['_sessions']}회")
 
-    return round(final, 3), reasons
+    return score, reasons
 
 
 @app.post("/ai/match/recommend", dependencies=[Depends(verify_token)])
@@ -304,7 +259,7 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
         c["rank"] = i
         c.pop("_gp", None)
 
-    return {"candidates": top, "scoring_method": "rule-v3"}
+    return {"candidates": top, "scoring_method": l2r.method_tag()}
 
 
 # ───────────── 가성비 재랭킹 (역경매 입찰 반영) ─────────────

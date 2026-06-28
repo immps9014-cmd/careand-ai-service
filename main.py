@@ -28,6 +28,7 @@ import math
 import os
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
@@ -138,26 +139,37 @@ def _llm_gemini(system: str, user_msg: str, max_tokens: int, temperature: float)
     }).encode("utf-8")
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}")
-    req = urllib.request.Request(url, data=payload,
-                                 headers={"content-type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=40) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        cands = data.get("candidates", [])
-        if not cands:
-            return None
-        parts = cands[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts).strip() or None
-    except urllib.error.HTTPError as e:
+    # 무료 등급은 일시 과부하/한도(429/500/503)가 잦음 → 짧은 백오프로 최대 3회 시도.
+    last_err = ""
+    for attempt in range(3):
+        req = urllib.request.Request(url, data=payload,
+                                     headers={"content-type": "application/json"}, method="POST")
         try:
-            detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
-        except Exception:
-            detail = ""
-        logger.warning("LLM(gemini) HTTP %s: %s", e.code, detail[:200])
-        return None
-    except Exception as e:
-        logger.warning("LLM(gemini) 호출 실패: %s", e)
-        return None
+            with urllib.request.urlopen(req, timeout=40) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            cands = data.get("candidates", [])
+            if not cands:
+                return None
+            parts = cands[0].get("content", {}).get("parts", [])
+            return "".join(p.get("text", "") for p in parts).strip() or None
+        except urllib.error.HTTPError as e:
+            try:
+                last_err = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
+            except Exception:
+                last_err = ""
+            if e.code in (429, 500, 503) and attempt < 2:
+                time.sleep(1.2 * (attempt + 1))  # 1.2s, 2.4s 백오프
+                continue
+            logger.warning("LLM(gemini) HTTP %s: %s", e.code, last_err[:200])
+            return None
+        except Exception as e:
+            last_err = str(e)
+            if attempt < 2:
+                time.sleep(1.2 * (attempt + 1))
+                continue
+            logger.warning("LLM(gemini) 호출 실패: %s", last_err)
+            return None
+    return None
 
 
 def llm_complete(system: str, user_msg: str, max_tokens: int = 1024, temperature: float = 0.3) -> str | None:
@@ -561,6 +573,32 @@ class AnomalyFeatures(BaseModel):
     body_temp_max: float | None = None
 
 
+# 위험 판정은 규칙(결정적)이 담당하고, 그 결과를 보호자가 이해하기 쉬운 자연어로 풀어주는
+# 설명만 LLM이 생성한다(하이브리드). LLM이 새 위험/수치를 만들지 않도록 범위를 못박는다.
+_ANOMALY_SYSTEM = (
+    "너는 시니어 돌봄 플랫폼의 보호자 안내 도우미다. 시스템이 규칙으로 산출한 이상징후 결과"
+    "(위험유형·심각도·근거·권고)를 받아 보호자가 이해하기 쉬운 따뜻한 존댓말 2~3문장으로 설명한다. "
+    "반드시 주어진 위험유형·근거·권고 범위 안에서만 말하고, 새로운 의학적 진단·수치·위험을 지어내지 마라. "
+    "불안을 부추기지 말고 차분하게, 보호자가 지금 할 수 있는 행동을 안내하라. "
+    "출력은 설명 문장만(머리말·JSON·마크다운 없이)."
+)
+_SEVERITY_LABEL = {"critical": "매우 높음", "high": "높음", "mid": "중간", "low": "낮음"}
+_RISK_LABEL = {"nutrition": "영양/식사", "depression": "우울/정서", "delirium": "섬망", "fall": "낙상"}
+
+
+def _anomaly_explanation(result: dict[str, Any]) -> str | None:
+    """규칙 결과 위에 보호자용 자연어 설명을 LLM으로 생성(미가용/실패 시 None — 판정엔 영향 없음)."""
+    if not llm_available():
+        return None
+    user = (
+        f"위험 유형: {_RISK_LABEL.get(result['risk_type'], result['risk_type'])}\n"
+        f"심각도: {_SEVERITY_LABEL.get(result['severity'], result['severity'])} (점수 {result['risk_score']}/100)\n"
+        f"근거: {', '.join(result.get('trigger_pattern') or []) or '없음'}\n"
+        f"권고: {', '.join(result.get('recommendation') or []) or '없음'}"
+    )
+    return llm_complete(_ANOMALY_SYSTEM, user, max_tokens=400, temperature=0.4)
+
+
 @app.post("/ai/anomaly/score", dependencies=[Depends(verify_token)])
 def anomaly_score(req: AnomalyFeatures) -> dict[str, Any]:
     risks: list[dict[str, Any]] = []
@@ -641,7 +679,7 @@ def anomaly_score(req: AnomalyFeatures) -> dict[str, Any]:
         "fall": ["혈압 약 복용 확인", "거주환경 안전 점검", "보행 보조 검토"],
     }
 
-    return {
+    result = {
         "senior_id": req.senior_id,
         "risk_score": round(score, 1),
         "risk_type": top["type"],
@@ -649,8 +687,14 @@ def anomaly_score(req: AnomalyFeatures) -> dict[str, Any]:
         "trigger_pattern": top["triggers"],
         "recommendation": recommend_map.get(top["type"], []),
         "all_risks": risks,
-        "model": "rule-v1",
+        "model": "rule-v1",  # 위험 판정은 규칙(결정적) 유지
     }
+    # 하이브리드: 규칙 결과 위에 보호자용 자연어 설명을 best-effort로 덧붙임(실패 시 생략)
+    explanation = _anomaly_explanation(result)
+    if explanation:
+        result["guardian_explanation"] = explanation
+        result["explanation_model"] = active_model()
+    return result
 
 
 # ───────────────────────── 5. 챗봇 (LLM + KB 폴백) ─────────────────────────

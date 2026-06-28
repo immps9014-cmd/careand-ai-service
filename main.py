@@ -22,6 +22,7 @@ LLM: .env의 ANTHROPIC_API_KEY가 있으면 Claude API 실호출, 없거나 호�
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import math
@@ -55,6 +56,9 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 # gemini-2.5-* 는 기본 'thinking'이 켜져 있어 출력 토큰(max_tokens)을 잠식 → 짧은 한도에서
 # 본문이 잘려 빈 응답이 되는 문제. 구조화 응답엔 thinking 불필요하므로 0(끔)이 기본.
 GEMINI_THINKING_BUDGET = int(os.environ.get("GEMINI_THINKING_BUDGET", "0"))
+# STT 엔진: "whisper"(로컬 faster-whisper, 기본) | "gemini"(멀티모달, 음성을 Google로 전송).
+# 케어 음성은 민감 PII이므로 운영 기본은 로컬 whisper 권장.
+STT_PROVIDER = os.environ.get("STT_PROVIDER", "whisper").strip().lower()
 
 logger = logging.getLogger("careand-ai")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -475,6 +479,58 @@ class TranscribeRequest(BaseModel):
     language: str = "ko"
 
 
+_STT_MIME = {
+    ".wav": "audio/wav", ".mp3": "audio/mp3", ".m4a": "audio/mp4", ".mp4": "audio/mp4",
+    ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".aac": "audio/aac",
+    ".webm": "audio/webm",
+}
+
+
+def _stt_gemini(path: str, language: str) -> str | None:
+    """Gemini 멀티모달 전사(인라인 오디오). 케어 음성을 Google로 전송하므로 PII 주의.
+    인라인 한도(~19MB) 초과 시 413(대용량은 whisper 권장)."""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY 미설정")
+    if os.path.getsize(path) > 19 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Gemini 인라인 STT 한도(~19MB) 초과 — whisper 사용 권장")
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    mime = _STT_MIME.get(os.path.splitext(path)[1].lower(), "audio/wav")
+    body = json.dumps({
+        "contents": [{"parts": [
+            {"text": f"이 {language} 음성을 글자 그대로 정확히 전사(transcribe)해줘. 다른 말 없이 전사 텍스트만 출력."},
+            {"inlineData": {"mimeType": mime, "data": b64}},
+        ]}],
+        "generationConfig": {"temperature": 0.0, "thinkingConfig": {"thinkingBudget": GEMINI_THINKING_BUDGET}},
+    }).encode("utf-8")
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}")
+    for attempt in range(3):
+        try:
+            r = urllib.request.Request(url, data=body, headers={"content-type": "application/json"}, method="POST")
+            with urllib.request.urlopen(r, timeout=90) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            cands = data.get("candidates", [])
+            if not cands:
+                return None
+            return "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", [])).strip() or None
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 503) and attempt < 2:
+                time.sleep(1.2 * (attempt + 1))
+                continue
+            try:
+                detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
+            except Exception:
+                detail = ""
+            raise HTTPException(status_code=502, detail=f"Gemini STT HTTP {e.code}: {detail[:160]}")
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(1.2 * (attempt + 1))
+                continue
+            raise HTTPException(status_code=502, detail=f"Gemini STT 실패: {e}")
+    return None
+
+
 @app.post("/ai/voice/transcribe", dependencies=[Depends(verify_token)])
 def transcribe(req: TranscribeRequest) -> dict[str, Any]:
     """음성 → 텍스트 (faster-whisper, CPU int8).
@@ -484,6 +540,17 @@ def transcribe(req: TranscribeRequest) -> dict[str, Any]:
     """
     path, is_tmp = _fetch_audio(req.audio_url)
     try:
+        if STT_PROVIDER == "gemini":
+            text = _stt_gemini(path, req.language or "ko")
+            if not text:
+                raise HTTPException(status_code=502, detail="Gemini STT 빈 결과")
+            return {
+                "stt_text": text,
+                "confidence": 0.9,
+                "duration_sec": None,
+                "language": req.language or "ko",
+                "model": f"{GEMINI_MODEL} (gemini-stt)",
+            }
         model = _get_whisper()
         with _whisper_infer_lock:
             segments, info = model.transcribe(

@@ -301,6 +301,24 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str =
     return score, reasons
 
 
+# 순위 판정은 rule-v3/L2R(결정적)가 담당하고, 1순위 추천 사유를 보호자용 문장으로
+# 풀어주는 설명만 LLM이 생성(하이브리드). 호출 비용/한도 고려해 1순위에만 붙인다.
+_MATCH_SYSTEM = (
+    "너는 시니어 돌봄 플랫폼의 매칭 안내 도우미다. 시스템이 순위화한 1순위 돌봄전문가의 추천 "
+    "근거(태그 목록)를 받아, 보호자가 '왜 이 분인지' 이해할 따뜻한 존댓말 1~2문장으로 풀어 쓴다. "
+    "주어진 근거 안에서만 말하고 새로운 사실·이름·수치를 지어내지 마라. 설명 문장만 출력."
+)
+
+
+def _match_reco_note(reasons: list[str], domain: str | None) -> str | None:
+    """1순위 후보의 추천 근거(태그)를 보호자용 자연어로 변환(미가용/실패/근거없음 시 None)."""
+    if not llm_available() or not reasons:
+        return None
+    dom = {"senior": "시니어 돌봄", "nursing": "병원 간병", "housekeeping": "가사 서비스"}.get(domain or "", "돌봄")
+    user = f"서비스: {dom}\n1순위 추천 근거: {', '.join(reasons)}"
+    return llm_complete(_MATCH_SYSTEM, user, max_tokens=300, temperature=0.4)
+
+
 @app.post("/ai/match/recommend", dependencies=[Depends(verify_token)])
 def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
     required = set(req.required_skills or [])
@@ -328,7 +346,14 @@ def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
         c["rank"] = i
         c.pop("_gp", None)
 
-    return {"candidates": top, "scoring_method": l2r.method_tag()}
+    result = {"candidates": top, "scoring_method": l2r.method_tag()}
+    # 하이브리드: 1순위 추천 사유를 보호자용 자연어로 best-effort 추가(실패 시 생략)
+    if top:
+        note = _match_reco_note(top[0].get("reasons", []), req.service_domain)
+        if note:
+            top[0]["recommendation_note"] = note
+            result["recommendation_model"] = active_model()
+    return result
 
 
 # ───────────── 가성비 재랭킹 (역경매 입찰 반영) ─────────────

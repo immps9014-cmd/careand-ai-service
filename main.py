@@ -314,7 +314,8 @@ def _match_reco_note(reasons: list[str], domain: str | None) -> str | None:
     """1순위 후보의 추천 근거(태그)를 보호자용 자연어로 변환(미가용/실패/근거없음 시 None)."""
     if not llm_available() or not reasons:
         return None
-    dom = {"senior": "시니어 돌봄", "nursing": "병원 간병", "housekeeping": "가사 서비스"}.get(domain or "", "돌봄")
+    dom = {"senior": "시니어 돌봄", "nursing": "병원 간병", "housekeeping": "가사 서비스",
+           "postpartum": "산후조리"}.get(domain or "", "돌봄")
     user = f"서비스: {dom}\n1순위 추천 근거: {', '.join(reasons)}"
     return llm_complete(_MATCH_SYSTEM, user, max_tokens=300, temperature=0.4)
 
@@ -1098,13 +1099,20 @@ def matching_postpartum(req: PostpartumMatchRequest) -> dict[str, Any]:
     finally:
         conn.close()
 
-    return {
+    result = {
         "status": "accepted",
         "match_request_id": req.match_request_id,
         "eligible_caregivers": len(caregivers),
         "candidates_inserted": inserted,
-        "model": "rule-v1",
+        "model": "rule-v1",  # 순위 판정은 규칙(결정적) 유지
     }
+    # 하이브리드: 1순위 추천 사유를 보호자용 자연어로 best-effort 추가(실패 시 생략)
+    if top:
+        note = _match_reco_note(top[0].get("reasons", []), "postpartum")
+        if note:
+            result["top_recommendation_note"] = note
+            result["recommendation_model"] = active_model()
+    return result
 
 
 # ───────────── 9. C:Writer 케어 일지 생성 (LLM + 템플릿 폴백) ─────────────

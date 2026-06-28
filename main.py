@@ -45,6 +45,13 @@ EXPECTED_TOKEN = os.environ.get("AI_SERVICE_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
+# LLM 프로바이더 선택: "anthropic"(Claude) | "gemini"(Google). 기본 anthropic.
+# 이 박스는 egress 제한이 있으나 Google HTTPS(generativelanguage.googleapis.com)는 도달 가능 —
+# Anthropic 키가 없을 때 Gemini로 대체 운용 가능.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+
 logger = logging.getLogger("careand-ai")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -66,13 +73,17 @@ def get_db_conn():
     )
 
 
-# ───────────────────────── LLM(Claude) 헬퍼 ─────────────────────────
+# ───────────────────────── LLM 헬퍼 (Claude / Gemini 선택형) ─────────────────────────
+def active_model() -> str:
+    """현재 프로바이더의 모델명(응답 model 라벨용)."""
+    return GEMINI_MODEL if LLM_PROVIDER == "gemini" else ANTHROPIC_MODEL
+
+
 def llm_available() -> bool:
-    return bool(ANTHROPIC_API_KEY)
+    return bool(GEMINI_API_KEY) if LLM_PROVIDER == "gemini" else bool(ANTHROPIC_API_KEY)
 
 
-def llm_complete(system: str, user_msg: str, max_tokens: int = 1024, temperature: float = 0.3) -> str | None:
-    """Claude Messages API 호출. 키 없음/실패 시 None (호출부가 폴백 처리)."""
+def _llm_anthropic(system: str, user_msg: str, max_tokens: int, temperature: float) -> str | None:
     if not ANTHROPIC_API_KEY:
         return None
     payload = json.dumps({
@@ -96,18 +107,56 @@ def llm_complete(system: str, user_msg: str, max_tokens: int = 1024, temperature
         with urllib.request.urlopen(req, timeout=40) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
-        text = "".join(parts).strip()
-        return text or None
+        return "".join(parts).strip() or None
     except urllib.error.HTTPError as e:
         try:
             detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
         except Exception:
             detail = ""
-        logger.warning("LLM HTTP %s: %s", e.code, detail[:200])
+        logger.warning("LLM(anthropic) HTTP %s: %s", e.code, detail[:200])
         return None
     except Exception as e:
-        logger.warning("LLM 호출 실패: %s", e)
+        logger.warning("LLM(anthropic) 호출 실패: %s", e)
         return None
+
+
+def _llm_gemini(system: str, user_msg: str, max_tokens: int, temperature: float) -> str | None:
+    if not GEMINI_API_KEY:
+        return None
+    payload = json.dumps({
+        "system_instruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature},
+    }).encode("utf-8")
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}")
+    req = urllib.request.Request(url, data=payload,
+                                 headers={"content-type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        cands = data.get("candidates", [])
+        if not cands:
+            return None
+        parts = cands[0].get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts).strip() or None
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read().decode("utf-8")).get("error", {}).get("message", "")
+        except Exception:
+            detail = ""
+        logger.warning("LLM(gemini) HTTP %s: %s", e.code, detail[:200])
+        return None
+    except Exception as e:
+        logger.warning("LLM(gemini) 호출 실패: %s", e)
+        return None
+
+
+def llm_complete(system: str, user_msg: str, max_tokens: int = 1024, temperature: float = 0.3) -> str | None:
+    """활성 프로바이더로 LLM 호출. 키 없음/실패 시 None (호출부가 폴백 처리)."""
+    if LLM_PROVIDER == "gemini":
+        return _llm_gemini(system, user_msg, max_tokens, temperature)
+    return _llm_anthropic(system, user_msg, max_tokens, temperature)
 
 
 def llm_complete_json(system: str, user_msg: str, max_tokens: int = 1024) -> dict | None:
@@ -148,7 +197,7 @@ def verify_token(authorization: str | None = Header(default=None)) -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    llm_state = f"ready({ANTHROPIC_MODEL})" if llm_available() else "fallback (ANTHROPIC_API_KEY 미설정)"
+    llm_state = f"ready({active_model()} · {LLM_PROVIDER})" if llm_available() else f"fallback ({LLM_PROVIDER} 키 미설정)"
     return {
         "status": "ok",
         "service": "careand-ai-service",
@@ -479,7 +528,7 @@ def summarize(req: SummarizeRequest) -> dict[str, Any]:
     if result and result.get("guardian_version"):
         result.setdefault("categorized", {})
         result["confidence"] = 0.9
-        result["model"] = ANTHROPIC_MODEL
+        result["model"] = active_model()
         return result
     return _summarize_heuristic(req.stt_text)
 
@@ -647,7 +696,7 @@ def chatbot_answer(req: ChatbotRequest) -> dict[str, Any]:
     ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
     answer = llm_complete(_CHATBOT_SYSTEM, f"컨텍스트: {ctx}\n\n질문: {req.question}", max_tokens=600)
     if answer:
-        return {"answer": answer, "sources": _kb_sources(req.question), "model": ANTHROPIC_MODEL}
+        return {"answer": answer, "sources": _kb_sources(req.question), "model": active_model()}
     return {
         "answer": (
             "지금은 AI 상담 엔진 점검 중이라 정확한 답변을 드리기 어렵습니다. "
@@ -787,7 +836,7 @@ def chatbot_postpartum(req: PostpartumChatRequest) -> dict[str, Any]:
         f"산모 컨텍스트: {ctx}\n\n대화 이력:\n{history_txt}\n\n산모 질문: {req.user_message}",
         max_tokens=700,
     )
-    model = ANTHROPIC_MODEL if answer else "rule-fallback"
+    model = active_model() if answer else "rule-fallback"
     if not answer:
         answer = _postpartum_rule_answer(req)
 
@@ -1036,7 +1085,7 @@ def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
                 "medical_version": result["medical_version"],
                 "categorized": grouped,
                 "confidence": 0.92,
-                "model": ANTHROPIC_MODEL,
+                "model": active_model(),
             }
 
     return _care_log_template(req)

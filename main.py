@@ -51,6 +51,9 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+# gemini-2.5-* 는 기본 'thinking'이 켜져 있어 출력 토큰(max_tokens)을 잠식 → 짧은 한도에서
+# 본문이 잘려 빈 응답이 되는 문제. 구조화 응답엔 thinking 불필요하므로 0(끔)이 기본.
+GEMINI_THINKING_BUDGET = int(os.environ.get("GEMINI_THINKING_BUDGET", "0"))
 
 logger = logging.getLogger("careand-ai")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -126,7 +129,12 @@ def _llm_gemini(system: str, user_msg: str, max_tokens: int, temperature: float)
     payload = json.dumps({
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temperature},
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": temperature,
+            # 2.5-flash thinking 끔(출력 토큰 보존). -1이면 동적, 양수면 해당 예산.
+            "thinkingConfig": {"thinkingBudget": GEMINI_THINKING_BUDGET},
+        },
     }).encode("utf-8")
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}")

@@ -771,6 +771,37 @@ class ForecastRequest(BaseModel):
     days: int = 7
 
 
+# 예측 수치는 통계(결정적)가 담당하고, 운영자용 자연어 인사이트만 LLM이 생성(하이브리드).
+_FORECAST_SYSTEM = (
+    "너는 시니어 돌봄 플랫폼의 운영 분석 도우미다. 통계로 산출된 수요예측 요약(기간·일평균/최고 "
+    "예상 요청 수·활동 인력 수·수급 부족 예상일)을 받아 운영 담당자가 바로 이해할 간결한 한국어 "
+    "2~3문장 인사이트를 쓴다. 주어진 수치 범위 안에서만 말하고 새 수치를 지어내지 마라. "
+    "수요가 인력을 초과할 위험이 있으면 인력 확보를, 여유가 있으면 그 점을 알려라. 설명 문장만 출력."
+)
+
+
+def _forecast_insight(result: dict[str, Any]) -> str | None:
+    """통계 예측 위에 운영자용 자연어 인사이트를 LLM으로 생성(미가용/실패 시 None)."""
+    if not llm_available():
+        return None
+    fs = result.get("forecasts") or []
+    if not fs:
+        return None
+    peak = max(fs, key=lambda f: f["predicted_requests"])
+    avg = round(sum(f["predicted_requests"] for f in fs) / len(fs), 1)
+    cg = fs[0].get("available_caregivers", 0)
+    short = [f["date"] for f in fs if f["predicted_requests"] > cg]
+    user = (
+        f"지역: {result.get('region')}\n"
+        f"예측 기간: {len(fs)}일\n"
+        f"일평균 예상 요청: {avg}건\n"
+        f"최고 예상일: {peak['date']} ({peak['predicted_requests']}건)\n"
+        f"활동 인력 수: {cg}명\n"
+        f"수급 부족 예상일: {', '.join(short) if short else '없음'}"
+    )
+    return llm_complete(_FORECAST_SYSTEM, user, max_tokens=400, temperature=0.4)
+
+
 @app.post("/ai/forecast/demand", dependencies=[Depends(verify_token)])
 def forecast_demand(req: ForecastRequest) -> dict[str, Any]:
     days = max(1, min(req.days, 30))
@@ -824,13 +855,18 @@ def forecast_demand(req: ForecastRequest) -> dict[str, Any]:
             }
         )
 
-    return {
+    result = {
         "region": req.region,
         "forecasts": forecasts,
         "history_days": lookback,
         "history_total_requests": sum(total),
-        "model": "seasonal-naive-v1",
+        "model": "seasonal-naive-v1",  # 예측 수치는 통계(결정적) 유지
     }
+    insight = _forecast_insight(result)
+    if insight:
+        result["operator_insight"] = insight
+        result["insight_model"] = active_model()
+    return result
 
 
 # ───────────── 7. 산후조리 챗봇 (LLM + 룰 폴백) ─────────────

@@ -271,7 +271,7 @@ class MatchRecommendRequest(BaseModel):
     caregivers: list[CaregiverFeature]
     top_k: int = 5
     min_score: float = 0.0
-    service_domain: str = "senior"      # senior|postpartum|nursing|housekeeping
+    service_domain: str = "senior"      # senior|living_support|nursing|postpartum|childcare|mental_care
     required_skills: list[str] = []     # 미보유 인력은 후보에서 하드 제외
     preferred_gender: str | None = None # M|F — 지정 시 일치 인력에 소프트 가산
 
@@ -318,8 +318,9 @@ def _match_reco_note(reasons: list[str], domain: str | None) -> str | None:
     """1순위 후보의 추천 근거(태그)를 보호자용 자연어로 변환(미가용/실패/근거없음 시 None)."""
     if not llm_available() or not reasons:
         return None
-    dom = {"senior": "시니어 돌봄", "nursing": "병원 간병", "housekeeping": "가사 서비스",
-           "postpartum": "산후조리"}.get(domain or "", "돌봄")
+    dom = {"senior": "시니어 돌봄", "nursing": "병원 간병", "living_support": "생활지원 서비스",
+           "housekeeping": "생활지원 서비스", "postpartum": "산후조리",
+           "childcare": "아이돌봄", "mental_care": "마음돌봄"}.get(domain or "", "돌봄")
     user = f"서비스: {dom}\n1순위 추천 근거: {', '.join(reasons)}"
     return llm_complete(_MATCH_SYSTEM, user, max_tokens=300, temperature=0.4)
 

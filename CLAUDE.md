@@ -61,6 +61,31 @@ careand-deploy ai         # git 스냅샷 → systemd restart → /health 확인
 
 ---
 
+## Claude Code 에이전트 / 스킬
+
+이 플랫폼 전용 에이전트 6개 + 스킬 5개가 정의돼 있다. `/root/caren/.claude/{agents,skills}/`에 있고
+admin-web/member-web/www/ai-service 4개 레포가 이 경로를 상속해서 공용으로 쓴다(`/root` git 저장소에
+추적됨). backend는 경로가 달라(`/var/www/careand-backend`) `deploy-checklist` 스킬만 이 레포
+`.claude/skills/`에 동일 내용으로 복제해뒀다. 케어앤 관련 작업을 할 땐 아래 중 맞는 게 있는지 먼저
+확인하고 재사용할 것 — 코드 실태와 어긋난 내용을 발견하면 새로 만들지 말고 해당 파일을 갱신할 것.
+
+**에이전트**
+- `backend-engineer` — Laravel API/JWT·권한/외부연동 스텁/큐 Job/마이그레이션
+- `frontend-engineer` — admin/member/www 공통 Next.js, 인증 아키텍처, basePath, 도메인 분기
+- `ai-service-engineer` — FastAPI(careand-ai-service), LLM우선+결정적폴백, L2R, Fuseki 연동, 모델교체
+- `devops-deploy` — systemd/Apache vhost/서버 제약(아웃바운드 화이트리스트·메모리), 장애대응
+- `matching-ontology` — 매칭 스코어링(rule-v3+L2R+가성비재랭킹), 가격 레이어, 온톨로지 스키마
+- `design-doc-editor` — AI 설계서 docx/pdf 편집·재생성 툴체인
+
+**스킬**
+- `deploy-checklist` — `careand-deploy` 배포 전/후 점검
+- `e2e-test-setup` — lt-server 헤드리스 브라우저 E2E 테스트 셋업
+- `domain-target-check` — 신규 서비스 도메인 추가 시 SSOT 3곳(backend config/온톨로지TTL/frontend) 동기화 체크
+- `ai-model-swap` — Whisper STT 모델 교체, L2R 재학습 절차
+- `venv-path-fix` — venv 이동 후 shebang 깨짐(`203/EXEC`) 진단·수정
+
+---
+
 ## 코딩 규칙
 
 ### 공통

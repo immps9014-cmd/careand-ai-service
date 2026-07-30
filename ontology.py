@@ -8,7 +8,6 @@ CLAUDE.md "폴백 경로를 제거하지 말 것" 참조).
 """
 from __future__ import annotations
 
-import functools
 import json
 import os
 import urllib.error
@@ -39,12 +38,19 @@ def _sparql_literals(values: frozenset[str]) -> str:
     return ", ".join(json.dumps(v) for v in values)
 
 
-@functools.lru_cache(maxsize=256)
+# 성공한 조회만 캐시(빈 결과도 성공이면 캐시 — 매핑이 원래 없는 질병 재조회를 막음).
+# 실패(네트워크/타임아웃)는 캐시하지 않는다 — Fuseki 다운 중엔 매 호출이 그대로 재시도되지만,
+# 복구 즉시 다음 호출에서 바로 정상 결과로 돌아와야 하기 때문(장애 중 캐싱하면 프로세스
+# 재시작 전까지 복구 후에도 계속 폴백 상태로 굳어버림 — 2026-07-30 케이스4 테스트에서 확인된 문제).
+_cache: dict[frozenset[str], frozenset[str]] = {}
+
+
 def related_specialty_labels(diseases: frozenset[str]) -> frozenset[str]:
-    """질병 라벨 집합 → 온톨로지상 관련 특기 라벨 집합. 미조회/실패 시 빈 집합.
-    프로세스 내 동일 질병조합 재조회를 피하기 위해 캐시(실패도 캐시돼 다운타임 중 재시도 폭주 방지)."""
+    """질병 라벨 집합 → 온톨로지상 관련 특기 라벨 집합. 조회 실패 시 빈 집합(캐시 안 함)."""
     if not diseases:
         return frozenset()
+    if diseases in _cache:
+        return _cache[diseases]
     query = _RELATED_SPECIALTIES_QUERY.format(disease_values=_sparql_literals(diseases))
     body = urllib.parse.urlencode({"query": query}).encode("utf-8")
     req = urllib.request.Request(
@@ -57,9 +63,11 @@ def related_specialty_labels(diseases: frozenset[str]) -> frozenset[str]:
             data = json.loads(resp.read())
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
         return frozenset()
-    return frozenset(b["label"]["value"] for b in data.get("results", {}).get("bindings", []))
+    result = frozenset(b["label"]["value"] for b in data.get("results", {}).get("bindings", []))
+    _cache[diseases] = result
+    return result
 
 
 def reset_cache() -> None:
     """Fuseki 데이터 갱신 후(재적재 등) 테스트/운영에서 캐시 무효화용."""
-    related_specialty_labels.cache_clear()
+    _cache.clear()

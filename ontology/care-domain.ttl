@@ -22,6 +22,12 @@ care:Recipient        a owl:Class ; rdfs:subClassOf care:Role ; rdfs:label "돌�
 care:GuardianIntent    a owl:Class ; rdfs:label "보호자 신청 의도"@ko ;
     rdfs:comment "guardians.intent 컬럼('care'|'housekeeping')에 대응. CLAUDE.md 규칙상 별도 Role이 아니라 Guardian의 속성이므로, 여기서도 Role의 subClassOf가 아니라 hasIntent로 연결되는 독립 클래스로 모델링한다."@ko .
 
+care:CareTerm     a owl:Class ; rdfs:label "케어 관찰 용어"@ko ;
+    rdfs:comment "케어 중 관찰·기록될 수 있는 상태/증상 어휘의 최소 단위. STT(faster-whisper) hotwords 힌트 어휘집으로 사용(main.py /ai/voice/transcribe)."@ko .
+care:HealthStatus a owl:Class ; rdfs:subClassOf care:CareTerm ; rdfs:label "건강상태 용어"@ko .
+care:MentalStatus a owl:Class ; rdfs:subClassOf care:CareTerm ; rdfs:label "정신상태 용어"@ko .
+care:LifeStatus   a owl:Class ; rdfs:subClassOf care:CareTerm ; rdfs:label "생활상태 용어"@ko .
+
 # ───────────────────────── 관계(ObjectProperty) ─────────────────────────
 
 care:subDomainOf a owl:ObjectProperty, owl:TransitiveProperty ;
@@ -55,6 +61,11 @@ care:code a owl:DatatypeProperty ;
     rdfs:range xsd:string ;
     rdfs:label "DB 코드값"@ko ;
     rdfs:comment "애플리케이션 DB의 enum 문자열(service_domain, category 등)과 1:1 대응 — SPARQL에서 코드 문자열로 개체를 찾을 때 사용."@ko .
+
+care:associatedTerm a owl:ObjectProperty ;
+    rdfs:domain care:Disease ; rdfs:range care:CareTerm ;
+    rdfs:label "연관 관찰 용어"@ko ;
+    rdfs:comment "해당 질병 케어 시 자주 관찰·기록되는 상태 용어. 전체 어휘집(care_term_vocabulary)과 별개로, 질병별 맞춤 STT 힌트를 만들 때 쓸 수 있는 확장 포인트."@ko .
 
 # ───────────────────────── 개체(Individuals): 요청 방식 ─────────────────────────
 
@@ -124,6 +135,62 @@ care:Diabetes a care:Disease ; rdfs:label "당뇨"@ko ;
 
 care:Parkinsons a care:Disease ; rdfs:label "파킨슨병"@ko ;
     care:requiresSpecialty care:MobilityAssist, care:MedicationManagement .
+
+# ───────────────────────── 개체: 케어 관찰 용어(CareTerm) — STT hotwords 어휘집 ─────────────────────────
+# faster-whisper hotwords로 그대로 넘어가는 실사용 어휘. 신규 용어는 이 섹션에 개체만 추가하면
+# ontology.care_term_vocabulary()가 다음 조회부터 자동으로 포함(reset_cache() 필요, 캐시 정책은 ontology.py 참조).
+
+care:PressureUlcer   a care:HealthStatus ; rdfs:label "욕창"@ko .
+care:Edema           a care:HealthStatus ; rdfs:label "부종"@ko .
+care:Fever           a care:HealthStatus ; rdfs:label "발열"@ko .
+care:Dehydration     a care:HealthStatus ; rdfs:label "탈수"@ko .
+care:Phlegm          a care:HealthStatus ; rdfs:label "가래"@ko .
+care:Dyspnea         a care:HealthStatus ; rdfs:label "호흡곤란"@ko .
+care:Vomiting        a care:HealthStatus ; rdfs:label "구토"@ko .
+care:Diarrhea        a care:HealthStatus ; rdfs:label "설사"@ko .
+care:Constipation    a care:HealthStatus ; rdfs:label "변비"@ko .
+care:Fall            a care:HealthStatus ; rdfs:label "낙상"@ko .
+care:Wound           a care:HealthStatus ; rdfs:label "상처"@ko .
+care:Aspiration      a care:HealthStatus ; rdfs:label "흡인"@ko .
+care:Hypertension    a care:HealthStatus ; rdfs:label "혈압상승"@ko .
+care:Hypotension     a care:HealthStatus ; rdfs:label "혈압저하"@ko .
+care:Hyperglycemia   a care:HealthStatus ; rdfs:label "혈당상승"@ko .
+care:Arrhythmia      a care:HealthStatus ; rdfs:label "부정맥"@ko .
+care:Hemiplegia      a care:HealthStatus ; rdfs:label "편마비"@ko .
+
+care:Delirium        a care:MentalStatus ; rdfs:label "섬망"@ko .
+care:Wandering       a care:MentalStatus ; rdfs:label "배회"@ko .
+care:Agitation       a care:MentalStatus ; rdfs:label "초조"@ko .
+care:Anxiety         a care:MentalStatus ; rdfs:label "불안"@ko .
+care:Depression      a care:MentalStatus ; rdfs:label "우울"@ko .
+care:Lethargy        a care:MentalStatus ; rdfs:label "무기력"@ko .
+care:Hallucination   a care:MentalStatus ; rdfs:label "환각"@ko .
+care:Disorientation  a care:MentalStatus ; rdfs:label "지남력장애"@ko .
+care:SleepDisorder   a care:MentalStatus ; rdfs:label "수면장애"@ko .
+care:Aggression      a care:MentalStatus ; rdfs:label "공격성"@ko .
+
+care:FoodRefusal     a care:LifeStatus ; rdfs:label "식사거부"@ko .
+care:Dysphagia       a care:LifeStatus ; rdfs:label "연하곤란"@ko .
+care:UnstableGait    a care:LifeStatus ; rdfs:label "보행불안정"@ko .
+care:UrinaryIncontinence a care:LifeStatus ; rdfs:label "실금"@ko .
+care:FecalIncontinence  a care:LifeStatus ; rdfs:label "실변"@ko .
+care:Bedridden       a care:LifeStatus ; rdfs:label "와상"@ko .
+care:Repositioning   a care:LifeStatus ; rdfs:label "자세변경"@ko .
+care:PoorHygiene     a care:LifeStatus ; rdfs:label "위생불량"@ko .
+care:Malnutrition    a care:LifeStatus ; rdfs:label "영양불균형"@ko .
+
+care:Dementia care:associatedTerm
+    care:Wandering, care:Delirium, care:Agitation, care:Disorientation,
+    care:SleepDisorder, care:Aggression, care:Hallucination .
+
+care:Stroke care:associatedTerm
+    care:Hemiplegia, care:Dysphagia, care:UnstableGait, care:UrinaryIncontinence .
+
+care:Diabetes care:associatedTerm
+    care:Hyperglycemia, care:Wound, care:Edema .
+
+care:Parkinsons care:associatedTerm
+    care:UnstableGait, care:Dysphagia, care:Lethargy .
 
 # ───────────────────────── 개체: 역할(Role) ─────────────────────────
 

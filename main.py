@@ -40,6 +40,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 import l2r  # 매칭 feature·룰점수·L2R 모델 게이팅의 단일 소스
+import ontology  # 온톨로지 SPARQL — 매칭 feature 보강 + STT hotwords 어휘집
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -555,11 +556,15 @@ def transcribe(req: TranscribeRequest) -> dict[str, Any]:
                 "model": f"{GEMINI_MODEL} (gemini-stt)",
             }
         model = _get_whisper()
+        # 케어 도메인 어휘(욕창/섬망/연하곤란 등)를 hotwords로 넘겨 인식률 보강.
+        # 온톨로지 미가용 시 빈 어휘 → hotwords=None으로 기존과 동일하게 동작(폴백).
+        hotwords = ", ".join(sorted(ontology.care_term_vocabulary())) or None
         with _whisper_infer_lock:
             segments, info = model.transcribe(
                 path,
                 language=req.language or "ko",
                 vad_filter=True,
+                hotwords=hotwords,
             )
             seg_list = list(segments)  # generator 소진 (락 안에서)
     except HTTPException:

@@ -134,6 +134,15 @@ def build_dataset():
             skipped += 1
             continue
         domain = req["service_domain"] or "senior"
+        if domain not in l2r.DOMAIN_WEIGHTS:
+            # l2r.rule_score()/subscores()가 실제로 다루는 도메인(DOMAIN_WEIGHTS의 senior/nursing/
+            # housekeeping)만 학습 표본으로 쓴다. postpartum은 /matching/postpartum이 별도
+            # 룰스코어러(_score_postpartum_caregiver)로 서빙하고 이 l2r 파이프라인을 아예 안 씀 —
+            # 게다가 postpartum 요청은 senior_id가 NULL이라(비시니어 도메인, DB 마이그레이션
+            # 2026_06_12_100001) recipient_features()에 넣으면 diseases=[]/lat=lng=None인
+            # 가짜 행만 만들어져 여기 포함시키면 안 됨.
+            skipped += 1
+            continue
         rec = recipient_features(req, seniors, patients, addrs)
 
         prior = sum(1 for t in hist.get((c["caregiver_id"], recipient_key(req)), [])

@@ -1,0 +1,137 @@
+@prefix care: <http://caren.aiclaude.kr/ontology#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<http://caren.aiclaude.kr/ontology> a owl:Ontology ;
+    rdfs:label "Care& 돌봄 도메인 온톨로지 (PoC)"@ko ;
+    rdfs:comment "careand-ai-service의 매칭 로직(l2r.py, main.py)에 있는 service_domain/specialty/disease/category 분류를 형식화한 PoC 스키마."@ko .
+
+# ───────────────────────── 클래스 ─────────────────────────
+
+care:ServiceDomain    a owl:Class ; rdfs:label "서비스 도메인"@ko .
+care:RequestMode      a owl:Class ; rdfs:label "요청 방식"@ko .
+care:ActivityCategory a owl:Class ; rdfs:label "케어일지 활동 분류"@ko .
+care:Disease          a owl:Class ; rdfs:label "질병/증상"@ko .
+care:Specialty        a owl:Class ; rdfs:label "돌봄전문가 특기"@ko .
+care:Role             a owl:Class ; rdfs:label "역할"@ko .
+care:Guardian         a owl:Class ; rdfs:subClassOf care:Role ; rdfs:label "보호자"@ko .
+care:Caregiver        a owl:Class ; rdfs:subClassOf care:Role ; rdfs:label "돌봄전문가"@ko .
+care:Recipient        a owl:Class ; rdfs:subClassOf care:Role ; rdfs:label "돌봄대상자"@ko .
+care:GuardianIntent    a owl:Class ; rdfs:label "보호자 신청 의도"@ko ;
+    rdfs:comment "guardians.intent 컬럼('care'|'housekeeping')에 대응. CLAUDE.md 규칙상 별도 Role이 아니라 Guardian의 속성이므로, 여기서도 Role의 subClassOf가 아니라 hasIntent로 연결되는 독립 클래스로 모델링한다."@ko .
+
+# ───────────────────────── 관계(ObjectProperty) ─────────────────────────
+
+care:subDomainOf a owl:ObjectProperty, owl:TransitiveProperty ;
+    rdfs:domain care:ServiceDomain ; rdfs:range care:ServiceDomain ;
+    rdfs:label "상위 도메인"@ko .
+
+care:hasRequestMode a owl:ObjectProperty ;
+    rdfs:domain care:ServiceDomain ; rdfs:range care:RequestMode ;
+    rdfs:label "요청 방식"@ko .
+
+care:requiresSpecialty a owl:ObjectProperty ;
+    rdfs:domain care:Disease ; rdfs:range care:Specialty ;
+    rdfs:label "필요 특기"@ko ;
+    rdfs:comment "l2r.py subscores()의 diseases ∩ specialties 완전일치 매칭을 보완하는 명시적 매핑. 향후 SPARQL 추론으로 specialty_score 보강에 사용."@ko .
+
+care:broaderSpecialty a owl:ObjectProperty, owl:TransitiveProperty ;
+    rdfs:domain care:Specialty ; rdfs:range care:Specialty ;
+    rdfs:label "상위 특기"@ko ;
+    rdfs:comment "예: 인지자극은 치매케어의 하위 개념. 완전일치가 안 되는 근접 특기를 부분점수로 인정할 때 추론 경로로 사용."@ko .
+
+care:aliasOf a owl:ObjectProperty ;
+    rdfs:domain care:Role ; rdfs:range care:Role ;
+    rdfs:label "역할 별칭"@ko ;
+    rdfs:comment "산후 본인형 신청자(postpartum_client)가 시스템상 guardian 역할로 별칭 처리되는 관계 등."@ko .
+
+care:hasIntent a owl:ObjectProperty ;
+    rdfs:domain care:Guardian ; rdfs:range care:GuardianIntent ;
+    rdfs:label "신청 의도"@ko .
+
+care:code a owl:DatatypeProperty ;
+    rdfs:range xsd:string ;
+    rdfs:label "DB 코드값"@ko ;
+    rdfs:comment "애플리케이션 DB의 enum 문자열(service_domain, category 등)과 1:1 대응 — SPARQL에서 코드 문자열로 개체를 찾을 때 사용."@ko .
+
+# ───────────────────────── 개체(Individuals): 요청 방식 ─────────────────────────
+
+care:ProxyRequest a care:RequestMode ; rdfs:label "대리형"@ko ;
+    rdfs:comment "요양보호사가 어르신을 대신 요청 (요양/간병/아이/마음)."@ko .
+care:SelfRequest  a care:RequestMode ; rdfs:label "본인형"@ko ;
+    rdfs:comment "본인이 직접 요청 (산모산후/가사)."@ko .
+
+# ───────────────────────── 개체: 서비스 도메인 ─────────────────────────
+# code 값은 careand-ai-service/main.py의 service_domain enum과 동일하게 맞춤.
+
+care:senior a care:ServiceDomain ;
+    rdfs:label "시니어 돌봄"@ko ; care:code "senior" ; care:hasRequestMode care:ProxyRequest .
+
+care:nursing a care:ServiceDomain ;
+    rdfs:label "병원 간병"@ko ; care:code "nursing" ; care:hasRequestMode care:ProxyRequest .
+
+care:childcare a care:ServiceDomain ;
+    rdfs:label "아이돌봄"@ko ; care:code "childcare" ; care:hasRequestMode care:ProxyRequest .
+
+care:mental_care a care:ServiceDomain ;
+    rdfs:label "마음돌봄"@ko ; care:code "mental_care" ; care:hasRequestMode care:ProxyRequest .
+
+care:postpartum a care:ServiceDomain ;
+    rdfs:label "산후조리"@ko ; care:code "postpartum" ; care:hasRequestMode care:SelfRequest .
+
+care:housekeeping a care:ServiceDomain ;
+    rdfs:label "생활지원 서비스"@ko ; care:code "housekeeping" ; care:hasRequestMode care:SelfRequest .
+
+care:living_support a care:ServiceDomain ;
+    rdfs:label "생활지원 서비스"@ko ; care:code "living_support" ; care:hasRequestMode care:SelfRequest ;
+    owl:sameAs care:housekeeping ;
+    rdfs:comment "main.py _match_reco_note에서 housekeeping과 동일 라벨('생활지원 서비스')을 쓰는 코드상 별칭 도메인."@ko .
+
+# ───────────────────────── 개체: 케어일지 활동 분류 (_CATEGORY_LABEL) ─────────────────────────
+
+care:meal       a care:ActivityCategory ; rdfs:label "식사"@ko ; care:code "meal" .
+care:medication a care:ActivityCategory ; rdfs:label "복약"@ko ; care:code "medication" .
+care:exercise   a care:ActivityCategory ; rdfs:label "활동"@ko ; care:code "exercise" .
+care:bath       a care:ActivityCategory ; rdfs:label "목욕"@ko ; care:code "bath" .
+care:mood       a care:ActivityCategory ; rdfs:label "정서"@ko ; care:code "mood" .
+care:cognition  a care:ActivityCategory ; rdfs:label "인지"@ko ; care:code "cognition" .
+care:other      a care:ActivityCategory ; rdfs:label "기타"@ko ; care:code "other" .
+
+# ───────────────────────── 개체: 특기(Specialty) — PoC 샘플 ─────────────────────────
+
+care:DementiaCare          a care:Specialty ; rdfs:label "치매케어"@ko .
+care:CognitiveStimulation  a care:Specialty ; rdfs:label "인지자극"@ko ;
+    care:broaderSpecialty care:DementiaCare .
+care:MobilityAssist        a care:Specialty ; rdfs:label "이동보조"@ko .
+care:Rehabilitation        a care:Specialty ; rdfs:label "재활보조"@ko ;
+    care:broaderSpecialty care:MobilityAssist .
+care:MedicationManagement  a care:Specialty ; rdfs:label "복약관리"@ko .
+care:DietManagement        a care:Specialty ; rdfs:label "식이관리"@ko .
+
+# ───────────────────────── 개체: 질병(Disease) — PoC 샘플 ─────────────────────────
+
+care:Dementia a care:Disease ; rdfs:label "치매"@ko ;
+    care:requiresSpecialty care:DementiaCare, care:CognitiveStimulation .
+
+care:Stroke a care:Disease ; rdfs:label "뇌졸중"@ko ;
+    care:requiresSpecialty care:MobilityAssist, care:Rehabilitation .
+
+care:Diabetes a care:Disease ; rdfs:label "당뇨"@ko ;
+    care:requiresSpecialty care:MedicationManagement, care:DietManagement .
+
+care:Parkinsons a care:Disease ; rdfs:label "파킨슨병"@ko ;
+    care:requiresSpecialty care:MobilityAssist, care:MedicationManagement .
+
+# ───────────────────────── 개체: 역할(Role) ─────────────────────────
+
+care:guardian   a care:Guardian   ; rdfs:label "보호자"@ko .
+care:caregiver  a care:Caregiver  ; rdfs:label "돌봄전문가"@ko .
+care:recipient  a care:Recipient ; rdfs:label "돌봄대상자"@ko .
+
+care:postpartum_client a care:Role ; rdfs:label "산모(본인형 신청자)"@ko ;
+    care:aliasOf care:guardian .
+
+care:CareIntent        a care:GuardianIntent ; rdfs:label "돌봄 의도"@ko ; care:code "care" .
+care:HousekeepingIntent a care:GuardianIntent ; rdfs:label "가사 의도"@ko ; care:code "housekeeping" .

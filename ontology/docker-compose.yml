@@ -1,0 +1,32 @@
+# 참고용 — 지금은 실행하지 않는다.
+#
+# 현재 PoC는 기존 moai-fuseki 컨테이너(같은 서버, host network, localhost:3030)에
+# "caren" 데이터셋만 추가해 공유하는 방식을 씀 (setup-caren-dataset.sh 참조) —
+# 이 서버 RAM 여유가 600Mi 미만이라 JVM 컨테이너를 하나 더 띄우는 걸 피함.
+#
+# caren을 전용 Fuseki 인스턴스로 분리해야 할 시점(다른 서버로 이전, 또는 이 서버 RAM 확보 시)에
+# 이 파일로 `docker compose up -d`. bridge 네트워크(ports: 매핑)를 쓰면 Fuseki 기본 shiro.ini의
+# localhostFilter가 관리 API(/$/**)를 막는다 — 그래서 host network + --localhost를 그대로 유지한다
+# (moai에서 이미 겪은 문제, docker-compose.yml.bak 히스토리 참조).
+services:
+  caren-fuseki:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caren-fuseki
+    network_mode: host
+    command: ["--localhost", "--port=3032"]
+    mem_limit: 550m
+    memswap_limit: 550m
+    restart: unless-stopped
+    volumes:
+      - caren_fuseki_data:/fuseki
+      - ./:/staging:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3032/$$/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  caren_fuseki_data:

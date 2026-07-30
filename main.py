@@ -291,6 +291,8 @@ def _score_caregiver(senior: dict[str, Any], cg: CaregiverFeature, domain: str =
     reasons: list[str] = []
     if sub["_matched"]:
         reasons.append(f"특기 일치: {', '.join(sorted(sub['_matched']))}")
+    if sub["_onto_matched"]:
+        reasons.append(f"온톨로지 근접 특기: {', '.join(sorted(sub['_onto_matched']))}")
     if sub["_prior"] > 0:
         reasons.append(f"단골 — 이전 돌봄 {sub['_prior']}회")
     if sub["gender_match"]:

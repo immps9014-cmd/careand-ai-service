@@ -18,6 +18,8 @@ import math
 import os
 from typing import Any
 
+import ontology
+
 # ── 룰 상수 (rule-v3와 동일 — 여기가 단일 출처) ─────────────────────────
 DOMAIN_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
     "senior": (0.4, 0.3, 0.2, 0.1),
@@ -30,7 +32,10 @@ CONTINUITY_SATURATION = 3.0
 CONTINUITY_WEIGHT = 0.15
 
 # feature 순서 = 모델 입력 순서 (학습/서빙 공유, 변경 시 재학습 필요)
-FEATURE_NAMES = ["specialty", "distance", "rating", "experience", "continuity", "gender_match"]
+# ontology_match는 gender_match와 마찬가지로 rule_score에는 안 쓰고 L2R 학습 시에만 반영
+# (온톨로지가 아직 PoC 샘플 수준이라 결정적 룰 점수를 흔들지 않기 위함).
+FEATURE_NAMES = ["specialty", "distance", "rating", "experience", "continuity",
+                  "gender_match", "ontology_match"]
 
 
 def _get(o: Any, key: str, default=None):
@@ -85,6 +90,14 @@ def subscores(recipient: dict, cg: Any, domain: str = "senior",
 
     gender_match = 1.0 if (preferred_gender and _get(cg, "gender") == preferred_gender) else 0.0
 
+    onto_related = ontology.related_specialty_labels(frozenset(diseases))
+    onto_matched = (onto_related & specialties) - matched
+    if onto_related:
+        ontology_match = min(len(onto_related & specialties) / len(onto_related), 1.0)
+    else:
+        # 온톨로지 미가용(Fuseki 다운) 또는 해당 질병의 매핑이 없음 → 기존 신호로 중립 폴백
+        ontology_match = specialty_score
+
     return {
         "specialty": specialty_score,
         "distance": distance_score,
@@ -92,8 +105,10 @@ def subscores(recipient: dict, cg: Any, domain: str = "senior",
         "experience": exp_score,
         "continuity": continuity_score,
         "gender_match": gender_match,
+        "ontology_match": ontology_match,
         "_dist_km": dist_km,
         "_matched": matched,
+        "_onto_matched": onto_matched,
         "_n": n,
         "_sessions": sessions,
         "_prior": prior,

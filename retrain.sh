@@ -5,7 +5,7 @@
 # 넘으면 이 한 번으로 L2R 블렌딩이 자동 활성화된다.
 #
 # 주기 재학습 예(매주 일요일 04:10):
-#   10 4 * * 0 /root/careand-ai-service/retrain.sh >> /root/careand-ai-service/retrain.log 2>&1
+#   10 4 * * 0 /root/caren/careand-ai-service/retrain.sh >> /root/caren/careand-ai-service/retrain.log 2>&1
 set -euo pipefail
 cd "$(dirname "$0")"
 echo "=== $(date '+%F %T') L2R 재학습 시작 ==="

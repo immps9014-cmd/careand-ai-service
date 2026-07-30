@@ -1,6 +1,6 @@
 #!/bin/bash
-cd /root/careand-ai-service
-LOG=/root/careand-ai-service/model_swap.log
+cd /root/caren/careand-ai-service
+LOG=/root/caren/careand-ai-service/model_swap.log
 exec > "$LOG" 2>&1
 set +e
 
@@ -12,8 +12,8 @@ from faster_whisper import WhisperModel
 import time, gc, math, sys
 AUDIO = "$AUDIO"
 try:
-    for name, path in [("base", "/root/careand-ai-service/models/base-ct2"),
-                       ("small", "/root/careand-ai-service/models/small-ct2")]:
+    for name, path in [("base", "/root/caren/careand-ai-service/models/base-ct2"),
+                       ("small", "/root/caren/careand-ai-service/models/small-ct2")]:
         m = WhisperModel(path, device="cpu", compute_type="int8")
         t = time.time()
         segs, info = m.transcribe(AUDIO, language="ko", vad_filter=True)
@@ -42,9 +42,9 @@ echo ""
 echo "=== [2/3] .env 적용: WHISPER_MODEL -> small-ct2 ==="
 cp .env .env.bak-20260624-whisper
 if grep -q '^WHISPER_MODEL=' .env; then
-  sed -i 's#^WHISPER_MODEL=.*#WHISPER_MODEL=/root/careand-ai-service/models/small-ct2#' .env
+  sed -i 's#^WHISPER_MODEL=.*#WHISPER_MODEL=/root/caren/careand-ai-service/models/small-ct2#' .env
 else
-  echo 'WHISPER_MODEL=/root/careand-ai-service/models/small-ct2' >> .env
+  echo 'WHISPER_MODEL=/root/caren/careand-ai-service/models/small-ct2' >> .env
 fi
 grep '^WHISPER_MODEL=' .env
 

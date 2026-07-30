@@ -1,7 +1,7 @@
 #!/bin/bash
 # whisper base CT2 model.bin curl 재시도 다운로더 (resume, 엔드포인트 교차)
 # 목표 크기: 74790398 bytes (Systran/faster-whisper-base model.bin)
-OUT=/root/careand-ai-service/models/base-ct2/model.bin
+OUT=/root/caren/careand-ai-service/models/base-ct2/model.bin
 TARGET=74790398
 URLS=(
   "https://hf-mirror.com/Systran/faster-whisper-base/resolve/main/model.bin"

@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /root/careand-ai-service/models/small-ct2 || exit 1
+cd /root/caren/careand-ai-service/models/small-ct2 || exit 1
 RESOLVE="https://huggingface.co/Systran/faster-whisper-small/resolve/main/model.bin"
 TOTAL=483546902
 CHUNK=33554432

@@ -2,8 +2,8 @@ from faster_whisper import WhisperModel
 import time, gc, math, glob, os
 AUDIOS = sorted(glob.glob("/var/www/careand-backend/storage/app/voice-logs/1/*.webm"))
 print(f"audio files: {len(AUDIOS)}")
-for name, path in [("base","/root/careand-ai-service/models/base-ct2"),
-                   ("small","/root/careand-ai-service/models/small-ct2")]:
+for name, path in [("base","/root/caren/careand-ai-service/models/base-ct2"),
+                   ("small","/root/caren/careand-ai-service/models/small-ct2")]:
     tload=time.time()
     m=WhisperModel(path, device="cpu", compute_type="int8")
     load_el=time.time()-tload

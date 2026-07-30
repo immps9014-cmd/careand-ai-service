@@ -44,6 +44,19 @@ SELECT DISTINCT ?label WHERE {
 }
 """
 
+# 질병별 연관 관찰 용어(associatedTerm) — 전역 어휘(care_term_vocabulary)를 보완하는
+# 환자 맞춤 확장분. 전역 어휘를 대체하지 않고 합집합으로만 쓴다(main.py 참조) — 좁히면
+# "진단명엔 없지만 실제 관찰된 증상"의 인식률이 떨어질 위험이 있어서.
+_ASSOCIATED_TERMS_QUERY = """
+PREFIX care: <http://caren.aiclaude.kr/ontology#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT DISTINCT ?label WHERE {{
+  ?disease a care:Disease ; rdfs:label ?dLabel ; care:associatedTerm ?term .
+  FILTER(STR(?dLabel) IN ({disease_values}))
+  ?term rdfs:label ?label .
+}}
+"""
+
 
 def _sparql_literals(values: frozenset[str]) -> str:
     return ", ".join(json.dumps(v) for v in values)
@@ -70,6 +83,7 @@ def _sparql_select(query: str) -> list[dict] | None:
 # 복구 즉시 다음 호출에서 바로 정상 결과로 돌아와야 하기 때문(장애 중 캐싱하면 프로세스
 # 재시작 전까지 복구 후에도 계속 폴백 상태로 굳어버림 — 2026-07-30 케이스4 테스트에서 확인된 문제).
 _cache: dict[frozenset[str], frozenset[str]] = {}
+_assoc_cache: dict[frozenset[str], frozenset[str]] = {}
 _vocab_cache: frozenset[str] | None = None
 
 
@@ -85,6 +99,22 @@ def related_specialty_labels(diseases: frozenset[str]) -> frozenset[str]:
         return frozenset()
     result = frozenset(b["label"]["value"] for b in bindings)
     _cache[diseases] = result
+    return result
+
+
+def associated_term_labels(diseases: frozenset[str]) -> frozenset[str]:
+    """질병 라벨 집합 → 온톨로지상 연관 CareTerm 라벨 집합(환자 맞춤 STT 어휘 확장분).
+    조회 실패 시 빈 집합(캐시 안 함) — related_specialty_labels와 동일한 정책."""
+    if not diseases:
+        return frozenset()
+    if diseases in _assoc_cache:
+        return _assoc_cache[diseases]
+    query = _ASSOCIATED_TERMS_QUERY.format(disease_values=_sparql_literals(diseases))
+    bindings = _sparql_select(query)
+    if bindings is None:
+        return frozenset()
+    result = frozenset(b["label"]["value"] for b in bindings)
+    _assoc_cache[diseases] = result
     return result
 
 
@@ -106,4 +136,5 @@ def reset_cache() -> None:
     """Fuseki 데이터 갱신 후(재적재 등) 테스트/운영에서 캐시 무효화용."""
     global _vocab_cache
     _cache.clear()
+    _assoc_cache.clear()
     _vocab_cache = None

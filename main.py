@@ -481,6 +481,7 @@ def _fetch_audio(audio_url: str) -> tuple[str, bool]:
 class TranscribeRequest(BaseModel):
     audio_url: str
     language: str = "ko"
+    diseases: list[str] = []  # 대상자 질병/특이사항(옵션) — 온톨로지 associatedTerm으로 STT 어휘 개인화
 
 
 _STT_MIME = {
@@ -557,8 +558,10 @@ def transcribe(req: TranscribeRequest) -> dict[str, Any]:
             }
         model = _get_whisper()
         # 케어 도메인 어휘(욕창/섬망/연하곤란 등)를 hotwords로 넘겨 인식률 보강.
-        # 온톨로지 미가용 시 빈 어휘 → hotwords=None으로 기존과 동일하게 동작(폴백).
-        hotwords = ", ".join(sorted(ontology.care_term_vocabulary())) or None
+        # 전역 어휘 ∪ 대상자 질병 연관 용어(있으면) — 좁히지 않고 합집합만 쓴다(진단명에
+        # 없는 증상도 여전히 인식돼야 하므로). 온톨로지 미가용 시 빈 어휘 → hotwords=None 폴백.
+        vocab = ontology.care_term_vocabulary() | ontology.associated_term_labels(frozenset(req.diseases))
+        hotwords = ", ".join(sorted(vocab)) or None
         with _whisper_infer_lock:
             segments, info = model.transcribe(
                 path,

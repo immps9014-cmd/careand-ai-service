@@ -6,6 +6,10 @@
 **이 파일은 5개 레포 각각의 루트에 동일하게 배치되어 있다** (단일 모노레포가 아님). 어느 레포에서
 작업하든 전체 플랫폼 토폴로지를 파악할 수 있도록 하기 위함. 레포별 세부 규칙은 하단 "레포별 규칙" 참조.
 
+**2026-07-30 경로 통합**: backend를 제외한 4개 레포(admin-web/member-web/www/ai-service)는 원래
+`/root` 바로 밑에 다른 테넌트(hisense, healing 등)와 뒤섞여 있었으나, `/root/caren/` 밑으로 모았다.
+backend는 Apache DocumentRoot·PHP-FPM 설정 의존성 때문에 `/var/www/careand-backend` 그대로 유지.
+
 ---
 
 ## 배포 토폴로지
@@ -26,10 +30,10 @@ caren.aiclaude.kr
 | 레포 | 경로 | 역할 | 포트 | systemd |
 |------|------|------|------|---------|
 | **careand-backend** | `/var/www/careand-backend` | Laravel 11 API, DB `careand_platform`(MySQL) | 9000(fpm) | `php-fpm` |
-| **careand-admin-web** | `/root/careand-admin-web` | 관리자 콘솔 (Next.js, basePath `/admin`) | 3105 | `careand-admin-web` |
-| **careand-member-web** | `/root/careand-member-web` | 보호자/돌봄전문가 회원 웹 (Next.js, basePath `/app`) | 3106 | `careand-member-web` |
-| **careand-www** | `/root/careand-www` | 공개 마케팅/탐색 웹 (Next.js, basePath `/www`) | 3107 | `careand-www` |
-| **careand-ai-service** | `/root/careand-ai-service` | 매칭 추천·챗봇·일지요약·이상징후·수요예측 (FastAPI) | 8001 | `careand-ai` |
+| **careand-admin-web** | `/root/caren/careand-admin-web` | 관리자 콘솔 (Next.js, basePath `/admin`) | 3105 | `careand-admin-web` |
+| **careand-member-web** | `/root/caren/careand-member-web` | 보호자/돌봄전문가 회원 웹 (Next.js, basePath `/app`) | 3106 | `careand-member-web` |
+| **careand-www** | `/root/caren/careand-www` | 공개 마케팅/탐색 웹 (Next.js, basePath `/www`) | 3107 | `careand-www` |
+| **careand-ai-service** | `/root/caren/careand-ai-service` | 매칭 추천·챗봇·일지요약·이상징후·수요예측 (FastAPI) | 8001 | `careand-ai` |
 | (부가) | — | 큐 워커 (`php artisan queue:work redis`, Job 코드 변경 시 재시작 필수) | — | `careand-queue` |
 
 DB=MySQL `careand_platform`, 캐시/큐=Redis. 인증은 JWT(`access_token`, Sanctum 아님). AI 서비스는
@@ -93,4 +97,4 @@ careand-deploy ai         # git 스냅샷 → systemd restart → /health 확인
 
 - **careand-backend**: Laravel 표준 관례. 라우트/캐시 변경 후 `route:cache`+`config:cache`+`php-fpm reload` 필수(위 참조).
 - **careand-admin-web / careand-member-web / careand-www**: Next.js. `.next.prev`는 배포 스크립트의 자동 롤백용이므로 수동 삭제 금지. member-web은 E2E 시 jsdelivr 폰트 요청을 차단해야 hydration이 정상 동작함(헤드리스 테스트 환경 특이사항).
-- **careand-ai-service**: FastAPI + venv(`venv/bin/uvicorn`). 모델 교체 스크립트(`swap_whisper*.sh`, `retrain.sh`)는 실행 전 `.env.bak-*` 백업 관례를 따를 것.
+- **careand-ai-service**: FastAPI + venv(`venv/bin/uvicorn`). 모델 교체 스크립트(`swap_whisper*.sh`, `retrain.sh`)는 실행 전 `.env.bak-*` 백업 관례를 따를 것. **venv를 다른 경로로 옮기면 `venv/bin/*`의 shebang(`#!/<구경로>/venv/bin/python3.9`)이 전부 깨져 `systemctl start`가 `203/EXEC`로 죽는다** — 디렉토리 이동 시 `venv/bin/` 전체에서 구 경로 shebang을 새 경로로 일괄 치환(`sed -i '1s|^#!<구경로>|#!<신경로>|'`) 필요.

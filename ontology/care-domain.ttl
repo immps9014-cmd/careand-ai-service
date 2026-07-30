@@ -109,11 +109,12 @@ care:Rehabilitation        a care:Specialty ; rdfs:label "재활보조"@ko ;
     care:broaderSpecialty care:MobilityAssist .
 care:MedicationManagement  a care:Specialty ; rdfs:label "복약관리"@ko .
 care:DietManagement        a care:Specialty ; rdfs:label "식이관리"@ko .
+care:EmotionalSupport      a care:Specialty ; rdfs:label "정서지원"@ko .
 
 # ───────────────────────── 개체: 질병(Disease) — PoC 샘플 ─────────────────────────
 
 care:Dementia a care:Disease ; rdfs:label "치매"@ko ;
-    care:requiresSpecialty care:DementiaCare, care:CognitiveStimulation .
+    care:requiresSpecialty care:DementiaCare, care:CognitiveStimulation, care:EmotionalSupport .
 
 care:Stroke a care:Disease ; rdfs:label "뇌졸중"@ko ;
     care:requiresSpecialty care:MobilityAssist, care:Rehabilitation .

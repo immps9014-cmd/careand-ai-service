@@ -98,7 +98,10 @@ admin-web/member-web/www/ai-service 4개 레포가 이 경로를 상속해서 �
 
 ### Next.js (admin/member/www 공통)
 - 회원가입 관련 role: 대리형(요양보호사가 어르신을 대신 요청 — 요양/간병/아이/마음)과 본인형(산모산후/가사, 본인이 직접 요청)이 구분됨. 새 도메인 추가 시 이 분기를 따를 것.
-- `guardians.intent`('care'|'housekeeping')로 가사요청자를 구분 — 별도 role이 아님.
+- `guardians.intent`로 요청 성격을 구분 — 별도 role이 아님. **실DB 값은 `care`·`housekeeping`·`postpartum` 세 가지다**
+  (2026-09-20 온톨로지 적재 중 실측 3건 — 산후 본인형 신청자가 guardian으로 별칭 처리되는 흐름의 흔적).
+  값을 늘릴 땐 `careand-ai-service/ontology/care-domain.ttl`의 `care:GuardianIntent` 개체도 같이 추가할 것 —
+  빠지면 `ontology/check.py`의 '어휘 미등록 보호자 의도'가 FAIL 난다.
 - www의 서버사이드 self-fetch(`NEXT_PUBLIC_API_URL`)는 `/etc/hosts`의 `127.0.0.1 caren.aiclaude.kr` 항목에 의존한다 — 이 항목이 없으면 서버가 자기 자신을 공인 IP로 해석해 egress 차단에 걸려 통계 API가 타임아웃-폴백(더미 문구)된다.
 - 돌봄전문가(인력) 개인정보는 비로그인 상태로 노출 금지 — 목록/상세는 로그인 후 member-web `/app/caregivers`에서만.
 

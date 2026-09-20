@@ -5,8 +5,9 @@
 @prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
 
 <http://caren.aiclaude.kr/ontology> a owl:Ontology ;
-    rdfs:label "Care& 돌봄 도메인 온톨로지 (PoC)"@ko ;
-    rdfs:comment "careand-ai-service의 매칭 로직(l2r.py, main.py)에 있는 service_domain/specialty/disease/category 분류를 형식화한 PoC 스키마."@ko .
+    rdfs:label "Care& 돌봄 도메인 온톨로지"@ko ;
+    owl:versionInfo "r2.0 (2026-09-20) — 어휘를 실DB 값 전수로 교체 + 업무객체(Caregiver·MatchRequest·CareSession 등 15클래스) 투영 개시. 3사 MES 온톨로지(TX-ONT-DESIGN)와 같은 운영 구조(ETL·불변식 점검·매시 재적재)를 갖춘다."@ko ;
+    rdfs:comment "careand-ai-service의 매칭 로직(l2r.py, main.py)에 있는 service_domain/specialty/disease/category 분류를 형식화한 어휘 스키마 + careand_platform DB 업무객체의 읽기 투영 스키마. DB가 SSOT이고 그래프는 투영이다 — 그래프를 고쳐서 업무 상태를 바꾸지 말 것."@ko .
 
 # ───────────────────────── 클래스 ─────────────────────────
 
@@ -15,10 +16,14 @@ care:RequestMode      a owl:Class ; rdfs:label "요청 방식"@ko .
 care:ActivityCategory a owl:Class ; rdfs:label "케어일지 활동 분류"@ko .
 care:Disease          a owl:Class ; rdfs:label "질병/증상"@ko .
 care:Specialty        a owl:Class ; rdfs:label "돌봄전문가 특기"@ko .
-care:Role             a owl:Class ; rdfs:label "역할"@ko .
-care:Guardian         a owl:Class ; rdfs:subClassOf care:Role ; rdfs:label "보호자"@ko .
-care:Caregiver        a owl:Class ; rdfs:subClassOf care:Role ; rdfs:label "돌봄전문가"@ko .
-care:Recipient        a owl:Class ; rdfs:subClassOf care:Role ; rdfs:label "돌봄대상자"@ko .
+care:Role             a owl:Class ; rdfs:label "역할"@ko ;
+    rdfs:comment "역할 '상수'의 클래스다(care:guardian·care:caregiver 등). ⚠ 실제 사람 개체는 care:Party 하위 클래스의 인스턴스이지 care:Role 의 인스턴스가 아니다 — r2.0 에서 분리했다. 섞으면 개체 수 점검이 역할 상수까지 세서 DB 와 어긋난다."@ko .
+care:Party            a owl:Class ; rdfs:label "참여자"@ko ;
+    rdfs:comment "돌봄 거래에 등장하는 사람/조직 객체의 상위 클래스."@ko .
+care:Guardian         a owl:Class ; rdfs:subClassOf care:Party ; rdfs:label "보호자"@ko .
+care:Caregiver        a owl:Class ; rdfs:subClassOf care:Party ; rdfs:label "돌봄전문가"@ko .
+care:Recipient        a owl:Class ; rdfs:subClassOf care:Party ; rdfs:label "돌봄대상자"@ko ;
+    rdfs:comment "시니어(seniors)·간병환자(nursing_patients)·산모(postpartum_clients)를 한 클래스로 본다. 도메인 차이는 care:recipientKind 속성으로 구분한다 — 클래스를 도메인별로 늘리지 않는다(TX-ONT-DESIGN §11.1 과 같은 방침)."@ko .
 care:GuardianIntent    a owl:Class ; rdfs:label "보호자 신청 의도"@ko ;
     rdfs:comment "guardians.intent 컬럼('care'|'housekeeping')에 대응. CLAUDE.md 규칙상 별도 Role이 아니라 Guardian의 속성이므로, 여기서도 Role의 subClassOf가 아니라 hasIntent로 연결되는 독립 클래스로 모델링한다."@ko .
 
@@ -194,12 +199,298 @@ care:Parkinsons care:associatedTerm
 
 # ───────────────────────── 개체: 역할(Role) ─────────────────────────
 
-care:guardian   a care:Guardian   ; rdfs:label "보호자"@ko .
-care:caregiver  a care:Caregiver  ; rdfs:label "돌봄전문가"@ko .
-care:recipient  a care:Recipient ; rdfs:label "돌봄대상자"@ko .
+care:guardian   a care:Role ; rdfs:label "보호자"@ko ; care:code "guardian" .
+care:caregiver  a care:Role ; rdfs:label "돌봄전문가"@ko ; care:code "caregiver" .
+care:recipient  a care:Role ; rdfs:label "돌봄대상자"@ko ; care:code "recipient" .
 
 care:postpartum_client a care:Role ; rdfs:label "산모(본인형 신청자)"@ko ;
     care:aliasOf care:guardian .
 
 care:CareIntent        a care:GuardianIntent ; rdfs:label "돌봄 의도"@ko ; care:code "care" .
 care:HousekeepingIntent a care:GuardianIntent ; rdfs:label "가사 의도"@ko ; care:code "housekeeping" .
+care:PostpartumIntent  a care:GuardianIntent ; rdfs:label "산후 의도"@ko ; care:code "postpartum" ;
+    rdfs:comment "2026-09-20 적재 중 실측 발견 — guardians.intent 에 'postpartum' 값이 3건 있다. CLAUDE.md 와 domain-target-check 스킬은 'care'|'housekeeping' 두 값만 적고 있어 문서가 실태보다 좁다(산후 본인형 신청자가 guardian 으로 별칭 처리되는 흐름의 흔적)."@ko .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# r2.0 — 업무객체(Business Object) 스키마
+#
+#   개체는 이 파일(schema 그래프)에 넣지 않는다. etl_caren.py 가 DB 를 읽어
+#   http://caren.aiclaude.kr/graph/caren 그래프로 투영한다.
+#
+#   IRI 규칙: http://caren.aiclaude.kr/id/{Class}/{naturalKey}
+#     3사 MES 는 업무키(수주번호·품목코드)를 자연키로 썼지만, careand_platform 은
+#     업무키 컬럼이 거의 없다(코드가 있는 건 service_categories.code·branches.code 뿐).
+#     따라서 대부분 PK 를 자연키로 쓴다 — PK 를 쓰는 이유가 "업무키가 없어서"임을
+#     명시해 둔다. 업무키가 생기면 그때 바꾼다.
+#
+#   ⚠ 개인정보 미적재 원칙(caren 고유, MES 3사엔 없던 제약)
+#     Fuseki 는 인증 없이 localhost 에 열려 있고 moai·kcro·tx-mes 와 한 인스턴스를
+#     공유한다. 이름·연락처·이메일·주소 원문·면허번호·암호화 컬럼은 적재하지 않는다.
+#     대신 마스킹 이름(care:displayName "김○○")·출생연도·지역코드·소수 2자리로
+#     반올림한 좌표(≈1.1km)만 싣는다. 사람을 특정하는 질의가 필요하면 DB 로 간다.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ── 업무객체 클래스 ──────────────────────────────────────────────────────────
+
+care:Organization a owl:Class ; rdfs:label "제휴 기관"@ko .
+care:Branch       a owl:Class ; rdfs:label "지점"@ko .
+
+care:ServiceCategory a owl:Class ; rdfs:label "서비스 카테고리"@ko ;
+    rdfs:comment "service_categories — 도메인 아래의 실제 판매 단위(방문요양·야간케어 등). 자연키는 code."@ko .
+
+care:PricingRule a owl:Class ; rdfs:label "가격 규칙"@ko ;
+    rdfs:comment "카테고리×지역의 할증·최저시급. 적정간병비 산출(PricingService::estimate)의 입력."@ko .
+
+care:ServiceAddress a owl:Class ; rdfs:label "서비스 주소"@ko ;
+    rdfs:comment "보호자가 등록한 방문지. 주소 원문은 싣지 않고 좌표 반올림값·주거형태만 싣는다."@ko .
+
+care:MatchRequest a owl:Class ; rdfs:label "매칭 요청"@ko ;
+    rdfs:comment "돌봄 요청 1건. 대상자(recipient)는 도메인마다 다른 컬럼(senior_id/nursing_patient_id/postpartum_client_id 등)에 들어 있어 care:forRecipient 하나로 모은다 — MatchRequest::recipientFeatures() 의 도메인 추상화와 같은 방침."@ko .
+
+care:MatchCandidate a owl:Class ; rdfs:label "매칭 후보"@ko ;
+    rdfs:comment "요청×돌봄전문가 1쌍의 추천 결과(AI 점수·순위·입찰가·응답). L2R 학습 표본의 원천이다."@ko .
+
+care:Match a owl:Class ; rdfs:label "성사된 매칭"@ko .
+
+care:CareSession a owl:Class ; rdfs:label "돌봄 세션"@ko ;
+    rdfs:comment "성사된 매칭의 1회 방문. 출퇴근 기록·음성일지·AI 요약이 여기에 달린다."@ko .
+
+care:AttendanceEvent a owl:Class ; rdfs:label "출퇴근 기록"@ko ;
+    rdfs:comment "checkin/checkout 이벤트. GPS 검증 결과(is_valid·distance_m)를 함께 싣는다."@ko .
+
+care:VoiceLog a owl:Class ; rdfs:label "음성 케어일지"@ko ;
+    rdfs:comment "STT 결과. ⚠ 전사 본문(stt_text)은 대상자 건강정보라 적재하지 않는다 — 길이·신뢰도·상태만."@ko .
+
+care:LogSummary a owl:Class ; rdfs:label "AI 일지 요약"@ko ;
+    rdfs:comment "ai_log_summaries. 본문은 싣지 않고 categorized 의 활동 분류 키만 care:categorized 로 잇는다."@ko .
+
+care:Review  a owl:Class ; rdfs:label "이용 후기"@ko .
+care:Payment a owl:Class ; rdfs:label "결제"@ko .
+care:PaymentItem a owl:Class ; rdfs:label "결제 항목"@ko .
+
+# ── 업무객체 관계 ────────────────────────────────────────────────────────────
+
+care:hasSpecialty a owl:ObjectProperty ;
+    rdfs:domain care:Caregiver ; rdfs:range care:Specialty ;
+    rdfs:label "보유 특기"@ko ;
+    rdfs:comment "caregivers.specialties(JSON 문자열 배열) → Specialty 개체. 문자열과 개체를 잇는 다리이고, 이게 있어야 '질병→필요특기→그 특기를 가진 사람' 이 한 질의로 닫힌다."@ko .
+
+care:servesDomain a owl:ObjectProperty ;
+    rdfs:domain care:Caregiver ; rdfs:range care:ServiceDomain ; rdfs:label "제공 도메인"@ko .
+
+care:mentoredBy a owl:ObjectProperty ;
+    rdfs:domain care:Caregiver ; rdfs:range care:Caregiver ; rdfs:label "멘토"@ko .
+
+care:atBranch a owl:ObjectProperty ; rdfs:range care:Branch ; rdfs:label "소속 지점"@ko .
+care:employedBy a owl:ObjectProperty ;
+    rdfs:domain care:Caregiver ; rdfs:range care:Organization ; rdfs:label "소속 기관"@ko .
+care:parentBranch a owl:ObjectProperty ;
+    rdfs:domain care:Branch ; rdfs:range care:Branch ; rdfs:label "상위 지점"@ko .
+
+care:guardianOf a owl:ObjectProperty ;
+    rdfs:domain care:Guardian ; rdfs:range care:Recipient ; rdfs:label "보호 대상"@ko .
+
+care:hasDisease a owl:ObjectProperty ;
+    rdfs:domain care:Recipient ; rdfs:range care:Disease ; rdfs:label "질병"@ko .
+
+care:requestedBy a owl:ObjectProperty ;
+    rdfs:domain care:MatchRequest ; rdfs:range care:Guardian ; rdfs:label "요청자"@ko .
+care:forRecipient a owl:ObjectProperty ;
+    rdfs:domain care:MatchRequest ; rdfs:range care:Recipient ; rdfs:label "돌봄 대상"@ko .
+care:inDomain a owl:ObjectProperty ;
+    rdfs:range care:ServiceDomain ; rdfs:label "서비스 도메인"@ko .
+care:ofCategory a owl:ObjectProperty ;
+    rdfs:range care:ServiceCategory ; rdfs:label "서비스 카테고리"@ko .
+care:atAddress a owl:ObjectProperty ;
+    rdfs:domain care:MatchRequest ; rdfs:range care:ServiceAddress ; rdfs:label "방문지"@ko .
+care:urgency a owl:DatatypeProperty ; rdfs:range xsd:string ;
+    rdfs:domain care:MatchRequest ; rdfs:label "요청 긴급도"@ko ;
+    rdfs:comment "match_requests.mode(normal/urgent 계열). ⚠ care:RequestMode(대리형·본인형)와 이름이 비슷하지만 다른 축이다 — 대리형/본인형은 서비스 도메인에 달려 있다(care:hasRequestMode)."@ko .
+care:requiresGender a owl:DatatypeProperty ;
+    rdfs:domain care:MatchRequest ; rdfs:label "선호 성별"@ko ;
+    rdfs:comment "requirements JSON 의 preferred_gender. 매칭 파티션 정렬의 근거값."@ko .
+
+care:candidateFor a owl:ObjectProperty ;
+    rdfs:domain care:MatchCandidate ; rdfs:range care:MatchRequest ; rdfs:label "대상 요청"@ko .
+care:proposes a owl:ObjectProperty ;
+    rdfs:domain care:MatchCandidate ; rdfs:range care:Caregiver ; rdfs:label "추천 인력"@ko .
+
+care:fulfills a owl:ObjectProperty ;
+    rdfs:domain care:Match ; rdfs:range care:MatchRequest ; rdfs:label "성사된 요청"@ko .
+care:assignedTo a owl:ObjectProperty ;
+    rdfs:domain care:Match ; rdfs:range care:Caregiver ; rdfs:label "배정 인력"@ko .
+
+care:ofMatch a owl:ObjectProperty ;
+    rdfs:range care:Match ; rdfs:label "소속 매칭"@ko .
+care:ofSession a owl:ObjectProperty ;
+    rdfs:range care:CareSession ; rdfs:label "소속 세션"@ko .
+care:fromVoiceLog a owl:ObjectProperty ;
+    rdfs:domain care:LogSummary ; rdfs:range care:VoiceLog ; rdfs:label "원본 음성일지"@ko .
+care:categorized a owl:ObjectProperty ;
+    rdfs:domain care:LogSummary ; rdfs:range care:ActivityCategory ; rdfs:label "기록된 활동 분류"@ko .
+
+care:ofPayment a owl:ObjectProperty ;
+    rdfs:domain care:PaymentItem ; rdfs:range care:Payment ; rdfs:label "소속 결제"@ko .
+care:paidBy a owl:ObjectProperty ;
+    rdfs:domain care:Payment ; rdfs:range care:Guardian ; rdfs:label "결제자"@ko .
+
+care:appliesToCategory a owl:ObjectProperty ;
+    rdfs:domain care:PricingRule ; rdfs:range care:ServiceCategory ; rdfs:label "적용 카테고리"@ko .
+care:acuityTerm a owl:ObjectProperty ;
+    rdfs:domain care:PricingRule ; rdfs:label "중증도 가산 용어"@ko ;
+    rdfs:comment "⚠ 용어별 가산 '금액'은 싣지 않는다 — 술어 하나에 (용어, 금액) 쌍을 담을 수 없고 reification 을 도입할 만한 질의 수요가 아직 없다. 금액이 필요하면 DB 를 본다."@ko ;
+    rdfs:comment "acuity_addons JSON 의 키(치매·와상·석션 등)를 Disease/CareTerm 개체로 잇는다. 가격 레이어가 쓰는 어휘와 케어일지·매칭이 쓰는 어휘가 같은 것인지 이 연결로 확인된다."@ko .
+
+# ── 업무객체 속성(DatatypeProperty) ──────────────────────────────────────────
+# 값 자체보다 '어느 DB 컬럼에서 왔는가'가 중요한 것들은 rdfs:comment 에 컬럼명을 남긴다.
+
+care:sourceTable a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "원천 테이블"@ko .
+care:dbId        a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "원천 PK"@ko .
+care:displayName a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "마스킹 이름"@ko ;
+    rdfs:comment "성 + ○○. 원문 이름은 적재하지 않는다."@ko .
+care:recipientKind a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "대상자 종류"@ko ;
+    rdfs:comment "senior | nursing_patient | postpartum_client — 원천 테이블 구분."@ko .
+care:gender      a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "성별"@ko .
+care:birthYear   a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "출생연도"@ko .
+care:careGrade   a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "장기요양 등급"@ko .
+care:status      a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "상태"@ko .
+care:regionCode  a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "지역코드"@ko .
+care:lat         a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "위도(반올림)"@ko .
+care:lng         a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "경도(반올림)"@ko .
+care:ratingAvg   a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "평점 평균"@ko .
+care:ratingCount a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "평점 수"@ko .
+care:completedSessions a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "완료 세션 수"@ko .
+care:gradeLevel  a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "인력 등급"@ko .
+care:careerTrack a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "경력 트랙"@ko .
+care:defaultRate a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "기본 시급"@ko .
+care:hourlyRate  a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "계약 시급"@ko .
+care:baseRate    a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "기준 단가"@ko .
+care:minHourly   a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "최저 시급"@ko .
+care:regionIndex a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "지역 지수"@ko .
+care:nightMult   a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "야간 할증"@ko .
+care:holidayMult a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "휴일 할증"@ko .
+care:emergencyMult a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "긴급 할증"@ko .
+care:scheduledStart a owl:DatatypeProperty ; rdfs:range xsd:dateTime ; rdfs:label "예정 시작"@ko .
+care:scheduledEnd   a owl:DatatypeProperty ; rdfs:range xsd:dateTime ; rdfs:label "예정 종료"@ko .
+care:actualStart    a owl:DatatypeProperty ; rdfs:range xsd:dateTime ; rdfs:label "실제 시작"@ko .
+care:actualEnd      a owl:DatatypeProperty ; rdfs:range xsd:dateTime ; rdfs:label "실제 종료"@ko .
+care:durationMin a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "소요 분"@ko .
+care:budgetHourly a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "희망 시급"@ko .
+care:aiScore     a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "AI 점수"@ko .
+care:rank        a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "추천 순위"@ko .
+care:candidateSource a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "후보 출처"@ko ;
+    rdfs:comment "ai | direct | self — AI 추천인지 보호자 지명인지 인력 자원인지."@ko .
+care:bidHourly   a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "입찰 시급"@ko .
+care:bidStatus   a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "입찰 상태"@ko .
+care:response    a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "후보 응답"@ko .
+care:isManual    a owl:DatatypeProperty ; rdfs:range xsd:boolean ; rdfs:label "수동 매칭 여부"@ko .
+care:eventType   a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "이벤트 종류"@ko .
+care:loggedAt    a owl:DatatypeProperty ; rdfs:range xsd:dateTime ; rdfs:label "기록 시각"@ko .
+care:distanceM   a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "기록 거리(m)"@ko .
+care:isValid     a owl:DatatypeProperty ; rdfs:range xsd:boolean ; rdfs:label "유효 여부"@ko .
+care:sttConfidence a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "STT 신뢰도"@ko .
+care:durationSec a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "녹음 길이(초)"@ko .
+care:llmModel    a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "요약 LLM"@ko .
+care:confidence  a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "요약 신뢰도"@ko .
+care:rating      a owl:DatatypeProperty ; rdfs:range xsd:integer ; rdfs:label "별점"@ko .
+care:reviewStatus a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "검수 상태"@ko ;
+    rdfs:comment "care_sessions.review_status — 세션 상태(care:status)와 별개 축이다."@ko .
+care:reviewerRole a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "작성자 역할"@ko .
+care:amount      a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "금액"@ko .
+care:amountSelfPay a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "본인부담금"@ko .
+care:amountLtcPay  a owl:DatatypeProperty ; rdfs:range xsd:decimal ; rdfs:label "장기요양 급여"@ko .
+care:itemType    a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "항목 종류"@ko .
+care:dwellingType a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "주거 형태"@ko .
+care:createdAt   a owl:DatatypeProperty ; rdfs:range xsd:dateTime ; rdfs:label "생성 시각"@ko .
+care:relation    a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:label "대상자와의 관계"@ko .
+care:autoBid     a owl:DatatypeProperty ; rdfs:range xsd:boolean ; rdfs:label "자동입찰 사용"@ko .
+
+# ═════════════════════════════════════════════════════════════════════════════
+# r2.0 — 어휘 정합: care:code 는 DB 문자열과 글자 그대로 같아야 한다
+#
+#   2026-09-20 실측으로 확인한 문제: PoC 어휘(특기 7·질병 4)는 DB 에 실제로 들어 있는
+#   문자열과 거의 겹치지 않았다. caregivers.specialties 22종 중 온톨로지와 같은 값은
+#   "정서지원" 하나뿐이었고, seniors.diseases 의 고혈압·관절염·허리는 온톨로지에 아예
+#   없어 related_specialty_labels() 가 빈 집합을 돌려줬다. 즉 ontology_match feature 가
+#   구조적으로 0 이었다.
+#
+#   그래서 care:code 를 도입한다 — **DB 에 저장된 문자열 그대로**. 개념 라벨(rdfs:label)과
+#   DB 코드(care:code)는 다를 수 있고(hk_cleaning ↔ "가사 청소"), 한 개념이 DB 문자열
+#   두 개로 들어와 있으면 care:code 를 두 번 단다("nursing_hospital"·"병원간병").
+#   ⚠ 여기에 없는 DB 값이 생기면 check.py 의 '어휘 미등록 특기/질병 = 0' 이 잡는다.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ── 기존 개념 특기에 DB 코드 부여 ────────────────────────────────────────────
+care:DementiaCare     care:code "치매" .
+care:EmotionalSupport care:code "정서지원" .
+
+# ── 임상 특기(DB 실값) ───────────────────────────────────────────────────────
+care:SpDialysis a care:Specialty ; rdfs:label "투석 간호"@ko ; care:code "투석" .
+care:SpPressureUlcerCare a care:Specialty ; rdfs:label "욕창 관리"@ko ; care:code "욕창" .
+care:SpDiabetesCare a care:Specialty ; rdfs:label "당뇨 관리"@ko ; care:code "당뇨" ;
+    care:broaderSpecialty care:MedicationManagement .
+care:SpHypertensionCare a care:Specialty ; rdfs:label "고혈압 관리"@ko ; care:code "고혈압" ;
+    care:broaderSpecialty care:MedicationManagement .
+
+# ── 서비스 특기(DB 실값) ─────────────────────────────────────────────────────
+care:SpSeniorCare a care:Specialty ; rdfs:label "시니어돌봄"@ko ; care:code "시니어돌봄" .
+care:SpNursingHospital a care:Specialty ; rdfs:label "병원간병"@ko ;
+    care:code "nursing_hospital", "병원간병" ;
+    rdfs:comment "같은 개념이 DB 에 코드값과 한글값 두 가지로 들어와 있다(caregivers.specialties). 객체는 하나로 두고 care:code 를 두 개 단다 — 합치지 않으면 같은 인력을 두 특기로 세게 된다."@ko .
+
+care:SpChildcare a care:Specialty ; rdfs:label "아이돌봄"@ko ; care:code "아이돌봄" .
+care:SpSchoolEscort a care:Specialty ; rdfs:label "등하원 동행"@ko ; care:code "등하원 동행" ;
+    care:broaderSpecialty care:SpChildcare .
+care:SpPlayGuidance a care:Specialty ; rdfs:label "놀이지도"@ko ; care:code "놀이지도" ;
+    care:broaderSpecialty care:SpChildcare .
+care:SpInfantCare a care:Specialty ; rdfs:label "영아 돌봄"@ko ; care:code "영아 돌봄" ;
+    care:broaderSpecialty care:SpChildcare .
+care:SpHomeChildcare a care:Specialty ; rdfs:label "가정보육"@ko ; care:code "가정보육" ;
+    care:broaderSpecialty care:SpChildcare .
+care:SpStudyGuidance a care:Specialty ; rdfs:label "학습지도"@ko ; care:code "학습지도" ;
+    care:broaderSpecialty care:SpChildcare .
+
+care:SpMentalCare a care:Specialty ; rdfs:label "마음돌봄"@ko ; care:code "마음돌봄" .
+care:SpCounseling a care:Specialty ; rdfs:label "심리상담"@ko ; care:code "심리상담" ;
+    care:broaderSpecialty care:SpMentalCare .
+care:SpFamilyCounseling a care:Specialty ; rdfs:label "가족상담"@ko ; care:code "가족상담" ;
+    care:broaderSpecialty care:SpCounseling .
+care:SpCBT a care:Specialty ; rdfs:label "인지행동"@ko ; care:code "인지행동" ;
+    care:broaderSpecialty care:SpMentalCare .
+
+care:SpHousekeeping a care:Specialty ; rdfs:label "가사지원"@ko ;
+    rdfs:comment "DB 코드 없음 — 청소/수리/정리수납을 묶기 위한 상위 개념. 근접 특기 인정 경로로만 쓰인다."@ko .
+care:SpCleaning a care:Specialty ; rdfs:label "가사 청소"@ko ; care:code "hk_cleaning" ;
+    care:broaderSpecialty care:SpHousekeeping .
+care:SpRepair a care:Specialty ; rdfs:label "가사 수리"@ko ; care:code "hk_repair" ;
+    care:broaderSpecialty care:SpHousekeeping .
+care:SpOrganizing a care:Specialty ; rdfs:label "정리수납"@ko ; care:code "hk_organizing" ;
+    care:broaderSpecialty care:SpHousekeeping .
+
+# ── 질병(DB 실값 전수) ───────────────────────────────────────────────────────
+# ⚠ care:Hypertension 은 이미 HealthStatus("혈압상승")로 쓰고 있다 — 질병 개체는 IRI 를 달리한다.
+
+care:HypertensionDisease a care:Disease ; rdfs:label "고혈압"@ko ; care:code "고혈압" ;
+    care:requiresSpecialty care:SpHypertensionCare, care:MedicationManagement, care:DietManagement ;
+    care:associatedTerm care:Hypertension, care:Hypotension, care:Edema, care:Dyspnea .
+
+care:Arthritis a care:Disease ; rdfs:label "관절염"@ko ; care:code "관절염" ;
+    care:requiresSpecialty care:MobilityAssist, care:Rehabilitation ;
+    care:associatedTerm care:UnstableGait, care:Edema, care:Fall .
+
+care:LowBackPain a care:Disease ; rdfs:label "허리"@ko ; care:code "허리" ;
+    rdfs:comment "DB 에 '허리' 로만 들어온다(요통·허리디스크의 생활어). 라벨을 임의로 '요통' 으로 고치면 DB 문자열과 어긋나므로 라벨도 DB 값 그대로 둔다."@ko ;
+    care:requiresSpecialty care:MobilityAssist, care:Rehabilitation ;
+    care:associatedTerm care:UnstableGait, care:Repositioning, care:Bedridden .
+
+# 기존 질병에 DB 코드 + 실제 존재하는 특기로 매핑 보강
+care:Dementia  care:code "치매" ; care:requiresSpecialty care:SpCBT .
+care:Diabetes  care:code "당뇨" ; care:requiresSpecialty care:SpDiabetesCare .
+care:Stroke    care:code "뇌졸중" ; care:requiresSpecialty care:SpPressureUlcerCare .
+# 파킨슨병은 아직 DB 에 없다 — code 를 달지 않는다(달면 '어휘에만 있는 코드' 로 오해된다).
+
+# ── 가격 레이어 중증도 어휘(pricing_rules.acuity_addons 키) ──────────────────
+# 치매·욕창·와상은 이미 있고, 석션·거동불가가 없었다. 가산 어휘와 케어일지 어휘가
+# 같은 집합이어야 "가산을 받는 상태가 실제로 기록되는가" 를 질의할 수 있다.
+care:Suction    a care:HealthStatus ; rdfs:label "석션"@ko .
+care:Immobility a care:LifeStatus   ; rdfs:label "거동불가"@ko .

@@ -21,16 +21,26 @@ TIMEOUT_SEC = float(os.environ.get("FUSEKI_TIMEOUT_SEC", "1.5"))
 
 _SPARQL_ENDPOINT = f"{FUSEKI_URL}/{FUSEKI_DATASET}/sparql"
 
-# 요구 특기(requiresSpecialty)의 상하위 특기(broaderSpecialty, 양방향 폐쇄)까지 라벨로 반환.
-# 예: 질병 "치매" → 요구특기 "치매케어" → broaderSpecialty 역방향으로 "인지자극"도 포함.
+# r2.0 부터 caren 데이터셋은 named graph 두 개로 나뉜다(그래프 단위 원자적 교체를 위해서 —
+# ontology/load.sh 참조). 어휘는 schema 그래프에만 있으므로 FROM 으로 기본그래프를 지정한다.
+# ⚠ FROM 을 빼면 TDB2 기본그래프가 비어 있어 **조용히 빈 결과**가 돌아온다(폴백과 구분 안 됨).
+GRAPH_SCHEMA = os.environ.get("FUSEKI_GRAPH_SCHEMA", "http://caren.aiclaude.kr/graph/schema")
+_FROM_SCHEMA = f"FROM <{GRAPH_SCHEMA}>"
+
+# 요구 특기(requiresSpecialty)의 **상위·하위** 특기까지 라벨/코드로 반환.
+# 예: 질병 "치매" → 요구특기 "치매케어" → 하위 "인지자극"도 포함.
+# ⚠ 상·하위를 따로 잇는다(위로 한 경로, 아래로 한 경로). r1 처럼 (broader|^broader)* 로
+#   섞으면 '위로 올라갔다 다시 내려오는' 경로가 생겨 **형제 특기까지 근접으로 인정**된다
+#   — 2026-09-20 실측에서 치매→가족상담, 당뇨→고혈압관리가 그렇게 딸려 들어왔다.
 _RELATED_SPECIALTIES_QUERY = """
 PREFIX care: <http://caren.aiclaude.kr/ontology#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT DISTINCT ?label WHERE {{
-  ?disease a care:Disease ; rdfs:label ?dLabel ; care:requiresSpecialty ?req .
+SELECT DISTINCT ?label {from_schema} WHERE {{
+  ?disease a care:Disease ; care:requiresSpecialty ?req .
+  {{ ?disease rdfs:label ?dLabel }} UNION {{ ?disease care:code ?dLabel }}
   FILTER(STR(?dLabel) IN ({disease_values}))
-  ?related (care:broaderSpecialty|^care:broaderSpecialty)* ?req .
-  ?related rdfs:label ?label .
+  {{ ?related care:broaderSpecialty* ?req }} UNION {{ ?req care:broaderSpecialty* ?related }}
+  {{ ?related rdfs:label ?label }} UNION {{ ?related care:code ?label }}
 }}
 """
 
@@ -38,11 +48,11 @@ SELECT DISTINCT ?label WHERE {{
 _CARE_TERM_VOCAB_QUERY = """
 PREFIX care: <http://caren.aiclaude.kr/ontology#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT DISTINCT ?label WHERE {
+SELECT DISTINCT ?label FROM <%s> WHERE {
   ?term a ?cls . ?cls rdfs:subClassOf* care:CareTerm .
   ?term rdfs:label ?label .
 }
-"""
+""" % GRAPH_SCHEMA
 
 # 질병별 연관 관찰 용어(associatedTerm) — 전역 어휘(care_term_vocabulary)를 보완하는
 # 환자 맞춤 확장분. 전역 어휘를 대체하지 않고 합집합으로만 쓴다(main.py 참조) — 좁히면
@@ -50,8 +60,9 @@ SELECT DISTINCT ?label WHERE {
 _ASSOCIATED_TERMS_QUERY = """
 PREFIX care: <http://caren.aiclaude.kr/ontology#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT DISTINCT ?label WHERE {{
-  ?disease a care:Disease ; rdfs:label ?dLabel ; care:associatedTerm ?term .
+SELECT DISTINCT ?label {from_schema} WHERE {{
+  ?disease a care:Disease ; care:associatedTerm ?term .
+  {{ ?disease rdfs:label ?dLabel }} UNION {{ ?disease care:code ?dLabel }}
   FILTER(STR(?dLabel) IN ({disease_values}))
   ?term rdfs:label ?label .
 }}
@@ -88,12 +99,18 @@ _vocab_cache: frozenset[str] | None = None
 
 
 def related_specialty_labels(diseases: frozenset[str]) -> frozenset[str]:
-    """질병 라벨 집합 → 온톨로지상 관련 특기 라벨 집합. 조회 실패 시 빈 집합(캐시 안 함)."""
+    """질병 라벨/코드 집합 → 관련 특기의 **라벨과 DB 코드를 모두** 담은 집합.
+
+    l2r.subscores() 가 이 집합을 caregivers.specialties(DB 원문 문자열)와 교집합하므로
+    DB 코드가 반드시 들어가야 한다. 개념 라벨만 돌려주던 r1 에서는 'hk_cleaning' 같은
+    코드값 특기가 영원히 안 걸렸다(2026-09-20 실측). 조회 실패 시 빈 집합(캐시 안 함).
+    """
     if not diseases:
         return frozenset()
     if diseases in _cache:
         return _cache[diseases]
-    query = _RELATED_SPECIALTIES_QUERY.format(disease_values=_sparql_literals(diseases))
+    query = _RELATED_SPECIALTIES_QUERY.format(disease_values=_sparql_literals(diseases),
+                                              from_schema=_FROM_SCHEMA)
     bindings = _sparql_select(query)
     if bindings is None:
         return frozenset()
@@ -109,7 +126,8 @@ def associated_term_labels(diseases: frozenset[str]) -> frozenset[str]:
         return frozenset()
     if diseases in _assoc_cache:
         return _assoc_cache[diseases]
-    query = _ASSOCIATED_TERMS_QUERY.format(disease_values=_sparql_literals(diseases))
+    query = _ASSOCIATED_TERMS_QUERY.format(disease_values=_sparql_literals(diseases),
+                                           from_schema=_FROM_SCHEMA)
     bindings = _sparql_select(query)
     if bindings is None:
         return frozenset()

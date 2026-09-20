@@ -34,10 +34,31 @@ venv/bin/python ontology/check.py     # 점검만
 
 - `ontology.py` → `l2r.py` 의 `ontology_match` feature (질병 → 필요 특기 → 보유 인력)
 - `ontology.py` → `main.py /ai/voice/transcribe` 의 STT hotwords (전역 38 + 질병별 연관 용어)
+- `ontology.py` 분석 질의 → `POST /ai/ontology/overview`·`/ai/ontology/caregiver-impact`
+  → backend `OntologyController` → 관리자 화면 **`/admin/ontology`**
 
-`ontology.py` 는 **schema 그래프만** 본다(`FROM <…/graph/schema>`).
-⚠ FROM 을 빼면 TDB2 기본그래프가 비어 있어 **조용히 빈 결과**가 돌아온다 — Fuseki 다운
-폴백과 구분이 안 된다. r2.0 에서 named graph 로 옮기며 생긴 제약이다.
+### 관리자 화면 `/admin/ontology`
+
+hisense MES `/impact` 의 caren 대응이다 — 자재 대신 사람, 수주 대신 매칭·세션을 본다.
+
+1. **질병별 공급 커버리지** — 질병 → 필요 특기(상·하위 폐쇄) → 활성 인력 수.
+   대상자는 있는데 인력이 0인 질병을 맨 위로 올려 강조한다(현재 관절염·허리).
+2. **특기별 활성 인력** — 위 공백의 원인. 질병이 요구하는데 보유자가 0인 특기를 주황으로.
+3. **인력 이탈 영향분석** — 한 명을 고르면 담당 매칭·세션·대상자 질병과 **대체 후보**
+   (온톨로지 근접 특기 폐쇄로 찾고, 공통 특기 수·평점·거리 순).
+
+화면 규칙:
+- **데이터 기준 시각 칩을 항상 띄운다.** 그래프는 스냅샷이라 그게 안 보이면 옛 수치를 최신으로
+  읽는다. 재적재가 2회분(2시간 10분) 밀리면 주황 경고로 바뀐다.
+- **조회 전용.** 그래프는 DB 의 투영이라 여기에 쓰기를 붙이면 SSOT 가 둘이 된다.
+  업무 상태 변경은 기존 엔드포인트로만.
+- **SPARQL 문자열은 계층을 넘지 않는다.** 화이트리스트 함수만 호출하고 파라미터는 정수 ID 뿐이다.
+- Fuseki 가 죽으면 200 + `available=false` 로 내려보내 화면은 살리고 분석 영역만 배너로 바꾼다.
+
+`ontology.py` 의 질의는 전부 `FROM` 으로 그래프를 명시한다 — 매칭·STT 경로는 schema 만,
+분석 질의는 schema + caren 둘 다. ⚠ FROM 을 빼면 TDB2 기본그래프가 비어 있어 **조용히 빈
+결과**가 돌아온다(Fuseki 다운 폴백과 구분 안 됨). r2.0 에서 named graph 로 옮기며 생긴 제약이다.
+타임아웃도 다르다 — 매칭 경로 1.5초(요청 지연에 직접 얹힌다), 분석 8초(화면 한 번 그릴 때만).
 
 ## 설계 결정 (바꾸려면 근거가 필요하다)
 

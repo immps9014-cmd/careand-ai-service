@@ -32,7 +32,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from dotenv import load_dotenv
@@ -1291,3 +1291,68 @@ def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
             }
 
     return _care_log_template(req)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 온톨로지 분석 (관리자 화면 /admin/ontology)
+#
+#   backend 의 OntologyController 가 프록시하고 admin-web 이 그린다.
+#   화이트리스트 질의만 실행한다 — 클라이언트가 SPARQL 을 보낼 방법이 없다.
+#   Fuseki 가 죽어도 200 으로 응답하고 available=false 만 내린다(화면이 배너를 띄운다).
+# ═════════════════════════════════════════════════════════════════════════════
+
+_ONTOLOGY_STATUS_FILE = os.path.join(os.path.dirname(__file__), "ontology", "out", "status.json")
+
+
+def _ontology_status() -> dict[str, Any]:
+    """마지막 적재 상태 — 그래프가 '언제 것인지' 화면에 반드시 보여야 한다.
+
+    스냅샷이라는 사실이 안 보이면 옛 수치를 최신으로 읽는다(hisense /impact 에서 얻은 교훈).
+    """
+    try:
+        with open(_ONTOLOGY_STATUS_FILE, encoding="utf-8") as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return {"state": "unknown", "data_at": None, "triples": None, "warnings": None,
+                "stale": True, "age_min": None}
+    age_min = None
+    stale = True
+    if st.get("data_at"):
+        try:
+            delta = datetime.now() - datetime.strptime(st["data_at"], "%Y-%m-%d %H:%M:%S")
+            age_min = int(delta.total_seconds() // 60)
+            stale = age_min > 130          # 매시 :10 재적재 → 2회분(2시간 10분) 넘으면 경고
+        except ValueError:
+            pass
+    return {"state": st.get("state"), "data_at": st.get("data_at"), "triples": st.get("triples"),
+            "warnings": st.get("warnings"), "elapsed_sec": st.get("elapsed_sec"),
+            "age_min": age_min, "stale": stale}
+
+
+class CaregiverImpactRequest(BaseModel):
+    caregiver_id: int
+
+
+@app.post("/ai/ontology/overview", dependencies=[Depends(verify_token)])
+def ontology_overview() -> dict[str, Any]:
+    available = ontology.graph_available()
+    if not available:
+        # Fuseki 다운 — 빈 표 + 배너. 매칭/STT 와 같은 fail-open 원칙.
+        return {"available": False, "status": _ontology_status(),
+                "diseases": [], "specialties": [], "caregivers": []}
+    return {
+        "available": True,
+        "status": _ontology_status(),
+        "diseases": ontology.disease_coverage(),
+        "specialties": ontology.specialty_supply(),
+        "caregivers": ontology.caregiver_directory(),
+    }
+
+
+@app.post("/ai/ontology/caregiver-impact", dependencies=[Depends(verify_token)])
+def ontology_caregiver_impact(req: CaregiverImpactRequest) -> dict[str, Any]:
+    if not ontology.graph_available():
+        return {"available": False, "found": False}
+    result = ontology.caregiver_impact(req.caregiver_id)
+    result["available"] = True
+    return result

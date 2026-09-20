@@ -156,3 +156,215 @@ def reset_cache() -> None:
     _cache.clear()
     _assoc_cache.clear()
     _vocab_cache = None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 분석 질의 — 관리자 화면(/admin/ontology)용
+#
+#   hisense MES 의 /impact 화면과 같은 방침:
+#   · **화이트리스트 질의만 실행한다.** 클라이언트가 SPARQL 문자열을 보내지 못한다.
+#     파라미터는 정수 ID 뿐이고 IRI 를 코드가 조립한다.
+#   · Fuseki 가 죽어도 화면이 통째로 죽지 않게 각 함수가 빈 결과로 폴백한다
+#     (호출측이 '온톨로지 미가용' 배너를 띄운다).
+#   · 스키마(어휘)와 데이터(업무객체)를 함께 봐야 하므로 FROM 을 둘 다 건다.
+# ═════════════════════════════════════════════════════════════════════════════
+
+GRAPH_DATA = os.environ.get("FUSEKI_GRAPH_DATA", "http://caren.aiclaude.kr/graph/caren")
+ID_BASE = "http://caren.aiclaude.kr/id/"
+
+# 분석 질의는 매칭 경로(1.5초)보다 여유를 준다 — 화면 한 번 그릴 때만 돈다.
+ANALYSIS_TIMEOUT_SEC = float(os.environ.get("FUSEKI_ANALYSIS_TIMEOUT_SEC", "8"))
+
+_BOTH = f"FROM <{GRAPH_SCHEMA}>\nFROM <{GRAPH_DATA}>"
+_PRE = ("PREFIX care: <http://caren.aiclaude.kr/ontology#>\n"
+        "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n")
+
+# 근접 특기 폐쇄 — 상·하위만(형제 특기 유입 차단, related_specialty_labels 와 같은 규칙).
+_CLOSURE = "{{ ?sp care:broaderSpecialty* ?req }} UNION {{ ?req care:broaderSpecialty* ?sp }}"
+
+
+def _rows(query: str, timeout: float = ANALYSIS_TIMEOUT_SEC) -> list[dict]:
+    """SELECT 실행 → [{var: value}]. 실패 시 빈 리스트(화면이 폴백 배너를 띄운다)."""
+    body = urllib.parse.urlencode({"query": query}).encode("utf-8")
+    req = urllib.request.Request(
+        _SPARQL_ENDPOINT, data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded",
+                 "Accept": "application/sparql-results+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return []
+    return [{k: v["value"] for k, v in b.items()} for b in data.get("results", {}).get("bindings", [])]
+
+
+def _local(iri: str) -> str:
+    return iri.rsplit("/", 1)[-1] if iri.startswith(ID_BASE) else iri.rsplit("#", 1)[-1]
+
+
+def graph_available() -> bool:
+    return bool(_rows(f"{_PRE}SELECT ?s {_BOTH} WHERE {{ ?s a care:Caregiver }} LIMIT 1", timeout=3))
+
+
+def disease_coverage() -> list[dict]:
+    """질병별 공급 커버리지 — 이 화면의 핵심.
+
+    '어떤 질병은 필요한 특기를 가진 인력이 아예 없다' 를 드러내는 게 목적이다.
+    hisense /impact 가 자재→수주 영향을 보여주듯, 여기선 질병→특기→인력을 본다.
+    """
+    caregivers = {r["d"]: int(r["n"]) for r in _rows(f"""{_PRE}
+        SELECT ?d (COUNT(DISTINCT ?cg) AS ?n) {_BOTH} WHERE {{
+          ?d a care:Disease ; care:requiresSpecialty ?req .
+          {_CLOSURE.format()}
+          ?cg a care:Caregiver ; care:hasSpecialty ?sp ; care:status "active" .
+        }} GROUP BY ?d""")}
+    recipients = {r["d"]: int(r["n"]) for r in _rows(f"""{_PRE}
+        SELECT ?d (COUNT(DISTINCT ?r) AS ?n) {_BOTH} WHERE {{
+          ?r a care:Recipient ; care:hasDisease ?d }} GROUP BY ?d""")}
+    requests = {r["d"]: int(r["n"]) for r in _rows(f"""{_PRE}
+        SELECT ?d (COUNT(DISTINCT ?mr) AS ?n) {_BOTH} WHERE {{
+          ?mr a care:MatchRequest ; care:forRecipient ?r . ?r care:hasDisease ?d }} GROUP BY ?d""")}
+    needs: dict[str, list[str]] = {}
+    for r in _rows(f"""{_PRE}
+        SELECT ?d ?label {_BOTH} WHERE {{
+          ?d a care:Disease ; care:requiresSpecialty ?req . ?req rdfs:label ?label }}"""):
+        needs.setdefault(r["d"], []).append(r["label"])
+
+    out = []
+    for r in _rows(f"""{_PRE}
+        SELECT ?d ?label ?code {_BOTH} WHERE {{
+          ?d a care:Disease ; rdfs:label ?label . OPTIONAL {{ ?d care:code ?code }} }}"""):
+        out.append({
+            "id": _local(r["d"]),
+            "label": r["label"],
+            "code": r.get("code"),          # code 가 없으면 DB 에 없는 질병(어휘 선행 등록분)
+            "in_db": bool(r.get("code")),
+            "required_specialties": sorted(needs.get(r["d"], [])),
+            "caregivers": caregivers.get(r["d"], 0),
+            "recipients": recipients.get(r["d"], 0),
+            "requests": requests.get(r["d"], 0),
+        })
+    # 공백(인력 0)이면서 실제 대상자가 있는 질병을 맨 위로 — 화면에서 제일 먼저 봐야 할 줄이다.
+    out.sort(key=lambda x: (x["caregivers"] > 0, -x["recipients"], x["label"]))
+    return out
+
+
+def specialty_supply() -> list[dict]:
+    """특기별 활성 인력 수 — 커버리지 공백의 원인을 짚는 표."""
+    counts = {r["sp"]: int(r["n"]) for r in _rows(f"""{_PRE}
+        SELECT ?sp (COUNT(DISTINCT ?cg) AS ?n) {_BOTH} WHERE {{
+          ?cg a care:Caregiver ; care:hasSpecialty ?sp ; care:status "active" }} GROUP BY ?sp""")}
+    needed = {r["sp"] for r in _rows(f"""{_PRE}
+        SELECT DISTINCT ?sp {_BOTH} WHERE {{ ?d a care:Disease ; care:requiresSpecialty ?sp }}""")}
+    out = []
+    for r in _rows(f"""{_PRE}
+        SELECT ?sp ?label {_BOTH} WHERE {{ ?sp a care:Specialty ; rdfs:label ?label }}"""):
+        out.append({"id": _local(r["sp"]), "label": r["label"],
+                    "caregivers": counts.get(r["sp"], 0),
+                    "required_by_disease": r["sp"] in needed})
+    out.sort(key=lambda x: (-x["caregivers"], x["label"]))
+    return out
+
+
+def caregiver_directory() -> list[dict]:
+    """영향분석 대상 고르기용 목록(마스킹 이름)."""
+    specs: dict[str, list[str]] = {}
+    for r in _rows(f"""{_PRE}
+        SELECT ?cg ?label {_BOTH} WHERE {{
+          ?cg a care:Caregiver ; care:hasSpecialty ?sp . ?sp rdfs:label ?label }}"""):
+        specs.setdefault(r["cg"], []).append(r["label"])
+    out = []
+    for r in _rows(f"""{_PRE}
+        SELECT ?cg ?name ?status ?grade ?rating {_BOTH} WHERE {{
+          ?cg a care:Caregiver ; care:status ?status .
+          OPTIONAL {{ ?cg care:displayName ?name }} OPTIONAL {{ ?cg care:gradeLevel ?grade }}
+          OPTIONAL {{ ?cg care:ratingAvg ?rating }} }}"""):
+        out.append({"id": int(_local(r["cg"])), "name": r.get("name") or "—",
+                    "status": r["status"], "grade": int(r["grade"]) if r.get("grade") else None,
+                    "rating": float(r["rating"]) if r.get("rating") else None,
+                    "specialties": sorted(specs.get(r["cg"], []))})
+    out.sort(key=lambda x: (x["status"] != "active", x["id"]))
+    return out
+
+
+def caregiver_impact(caregiver_id: int) -> dict:
+    """인력 1명이 빠지면 무엇이 흔들리는가 — hisense /impact 의 caren 대응.
+
+    자재 대신 사람이고, 수주 대신 매칭·세션이다. 대체 후보는 온톨로지 근접 특기
+    폐쇄로 찾는다(같은 특기 완전일치만 보면 대체 가능한 사람을 놓친다).
+    """
+    cg = f"<{ID_BASE}Caregiver/{int(caregiver_id)}>"
+    info = _rows(f"""{_PRE}
+        SELECT ?name ?status ?grade ?rating ?lat ?lng ?sessions {_BOTH} WHERE {{
+          {cg} a care:Caregiver ; care:status ?status .
+          OPTIONAL {{ {cg} care:displayName ?name }} OPTIONAL {{ {cg} care:gradeLevel ?grade }}
+          OPTIONAL {{ {cg} care:ratingAvg ?rating }} OPTIONAL {{ {cg} care:lat ?lat }}
+          OPTIONAL {{ {cg} care:lng ?lng }} OPTIONAL {{ {cg} care:completedSessions ?sessions }} }}""")
+    if not info:
+        return {"found": False}
+    i = info[0]
+
+    specialties = [r["label"] for r in _rows(f"""{_PRE}
+        SELECT ?label {_BOTH} WHERE {{ {cg} care:hasSpecialty ?sp . ?sp rdfs:label ?label }}""")]
+
+    # 담당 매칭 — 대상자·일정·상태. 대상자 이름은 그래프에 마스킹본만 있다.
+    matches = [{
+        "match_id": int(_local(r["m"])), "status": r.get("status"),
+        "scheduled_start": r.get("start"), "recipient": r.get("rname") or "—",
+        "recipient_kind": r.get("kind"), "domain": _local(r["domain"]) if r.get("domain") else None,
+    } for r in _rows(f"""{_PRE}
+        SELECT ?m ?status ?start ?rname ?kind ?domain {_BOTH} WHERE {{
+          ?m a care:Match ; care:assignedTo {cg} ; care:fulfills ?mr .
+          OPTIONAL {{ ?m care:status ?status }} OPTIONAL {{ ?m care:scheduledStart ?start }}
+          OPTIONAL {{ ?mr care:inDomain ?domain }}
+          OPTIONAL {{ ?mr care:forRecipient ?r .
+                     OPTIONAL {{ ?r care:displayName ?rname }} OPTIONAL {{ ?r care:recipientKind ?kind }} }}
+        }} ORDER BY ?start""")]
+
+    sessions = [{
+        "session_id": int(_local(r["s"])), "status": r.get("status"),
+        "scheduled_start": r.get("start"), "review_status": r.get("review"),
+    } for r in _rows(f"""{_PRE}
+        SELECT ?s ?status ?start ?review {_BOTH} WHERE {{
+          ?s a care:CareSession ; care:ofMatch ?m . ?m care:assignedTo {cg} .
+          OPTIONAL {{ ?s care:status ?status }} OPTIONAL {{ ?s care:scheduledStart ?start }}
+          OPTIONAL {{ ?s care:reviewStatus ?review }} }} ORDER BY ?start""")]
+
+    # 담당 대상자들의 질병 — 대체 인력이 갖춰야 할 요건의 근거.
+    diseases = sorted({r["label"] for r in _rows(f"""{_PRE}
+        SELECT DISTINCT ?label {_BOTH} WHERE {{
+          ?m a care:Match ; care:assignedTo {cg} ; care:fulfills ?mr .
+          ?mr care:forRecipient ?r . ?r care:hasDisease ?d . ?d rdfs:label ?label }}""")})
+
+    lat = float(i["lat"]) if i.get("lat") else None
+    lng = float(i["lng"]) if i.get("lng") else None
+    alternatives = []
+    for r in _rows(f"""{_PRE}
+        SELECT ?alt ?name ?rating ?lat ?lng (COUNT(DISTINCT ?sp) AS ?shared) {_BOTH} WHERE {{
+          {cg} care:hasSpecialty ?req .
+          {_CLOSURE.format()}
+          ?alt a care:Caregiver ; care:hasSpecialty ?sp ; care:status "active" .
+          FILTER(?alt != {cg})
+          OPTIONAL {{ ?alt care:displayName ?name }} OPTIONAL {{ ?alt care:ratingAvg ?rating }}
+          OPTIONAL {{ ?alt care:lat ?lat }} OPTIONAL {{ ?alt care:lng ?lng }}
+        }} GROUP BY ?alt ?name ?rating ?lat ?lng ORDER BY DESC(?shared) LIMIT 10"""):
+        dist = None
+        if lat is not None and lng is not None and r.get("lat") and r.get("lng"):
+            # 좌표는 소수 2자리로 반올림돼 있다(개인정보 정책) — 거리도 그 정밀도까지만 의미 있다.
+            dist = round(((float(r["lat"]) - lat) ** 2 + ((float(r["lng"]) - lng) * 0.79) ** 2) ** 0.5 * 111, 1)
+        alternatives.append({"id": int(_local(r["alt"])), "name": r.get("name") or "—",
+                             "rating": float(r["rating"]) if r.get("rating") else None,
+                             "shared_specialties": int(r["shared"]), "distance_km": dist})
+
+    return {
+        "found": True,
+        "caregiver": {"id": int(caregiver_id), "name": i.get("name") or "—",
+                      "status": i["status"], "grade": int(i["grade"]) if i.get("grade") else None,
+                      "rating": float(i["rating"]) if i.get("rating") else None,
+                      "completed_sessions": int(i["sessions"]) if i.get("sessions") else 0,
+                      "specialties": sorted(specialties)},
+        "matches": matches,
+        "sessions": sessions,
+        "recipient_diseases": diseases,
+        "alternatives": alternatives,
+    }

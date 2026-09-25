@@ -209,6 +209,12 @@ app = FastAPI(
     description="Care& AI 마이크로서비스 — 실구현 전환(룰/시계열 + LLM 폴백 구조)",
 )
 
+# caren-ontology MCP(HTTP 전송, CAREN-ONT-MCP C1) — /mcp. 도구는 ontology.py 함수만 부른다.
+# 인증은 verify_token(내부 토큰)이 아니라 /etc/caren-mcp 전용 토큰(mcp_caren 내부에서 검증).
+import mcp_caren  # noqa: E402
+
+app.include_router(mcp_caren.router)
+
 
 def verify_token(authorization: str | None = Header(default=None)) -> None:
     """Bearer 토큰 검증 (EXPECTED_TOKEN이 비어있으면 검증 생략 — 로컬/스텁용)."""

@@ -186,6 +186,17 @@ def tool_defs() -> list[dict[str, Any]]:
             "annotations": {**_RO, "idempotentHint": False},
         },
         {
+            "name": "nl_kpi",
+            "title": "자연어 질문 처리율 KPI",
+            "description": "호출 로그에서 자연어 질문 처리율을 계산한다 — 질문·처리·미처리 사유·도구별 호출·"
+                           "못 푼 질문 목록. 처리율 정의는 응답의 definition 필드에 있다.",
+            "inputSchema": {"type": "object", "properties": {
+                "question": _Q,
+                "days": {"type": "integer", "minimum": 1, "maximum": 365, "description": "집계 기간(기본 30일)"},
+            }},
+            "annotations": _RO,
+        },
+        {
             "name": "log_unanswered",
             "title": "미응답 질문 기록",
             "description": "케어앤 데이터 질문인데 어떤 도구로도 답할 수 없을 때 한 번 기록한다(도구 백로그·KPI).",
@@ -284,6 +295,15 @@ def tool_run_invariants(args: dict) -> dict[str, Any]:
             "note": "FAIL=적재 무결성 깨짐(그래프를 믿지 말 것) · WARN=원천 DB 품질 보고(실패 아님)."}
 
 
+def tool_nl_kpi(args: dict) -> dict[str, Any]:
+    import mcp_kpi
+    try:
+        days = int(args.get("days") or 30)
+    except (TypeError, ValueError):
+        raise ToolError("days 는 정수여야 합니다.")
+    return mcp_kpi.compute(days=days, logs=[CALL_LOG])
+
+
 def tool_log_unanswered(args: dict) -> dict[str, Any]:
     # 기록 자체는 호출 로그가 한다(outcome=unanswered). 여기서는 입력만 확인한다.
     str_arg(args, "question", 500)
@@ -298,12 +318,15 @@ _TOOL_FNS = {
     "caregiver_impact": tool_caregiver_impact,
     "resolve_care_term": tool_resolve_care_term,
     "run_invariants": tool_run_invariants,
+    "nl_kpi": tool_nl_kpi,
     "log_unanswered": tool_log_unanswered,
 }
 
 
 def log_call(session: dict, tool: str, args: dict, outcome: str, ms: int, err: str | None = None) -> None:
     """호출 한 건을 JSONL 로. 로그 실패는 도구 응답을 막지 않는다(stderr 로만 알림)."""
+    if tool == "nl_kpi":
+        return                                  # KPI 를 보는 호출은 KPI 에 넣지 않는다(tx 와 동일)
     q = args.get("question")
     a = {k: (str(v)[:200] if isinstance(v, (str, int, float, bool)) else "(생략)")
          for k, v in args.items() if k != "question"}

@@ -52,7 +52,7 @@ def main() -> int:
 
     r = call(s, "tools/list")
     names = [t["name"] for t in r["tools"]]
-    check("tools/list = 6종", len(names) == 6, ", ".join(names))
+    check("tools/list = 7종", len(names) == 7, ", ".join(names))
 
     r = call(s, "resources/list")
     check("resources/list = 3종", len(r["resources"]) == 3)
@@ -92,6 +92,14 @@ def main() -> int:
 
     err, d = tool(s, "log_unanswered", {"question": "selftest 미응답", "reason": "selftest"})
     check("log_unanswered", not err and d.get("recorded") is True)
+
+    err, d = tool(s, "nl_kpi", {"days": 30})
+    check("nl_kpi", not err and d.get("questions", 0) >= 1 and "rate" in d and "definition" in d,
+          f"질문 {d.get('questions')} · 처리율 {d.get('rate')}" if not err else str(d)[:120])
+    # 방금 log_unanswered 로 남긴 질문이 미처리(unanswered)로 잡혀야 KPI 정의가 맞다
+    check("nl_kpi 미처리 분류", not err and d.get("unprocessed_by_reason", {}).get("unanswered", 0) >= 1)
+    err, d = tool(s, "nl_kpi", {"days": "x"})
+    check("nl_kpi 잘못된 days → 도구 오류", err is True)
 
     try:
         call(s, "tools/call", {"name": "no_such_tool", "arguments": {}})

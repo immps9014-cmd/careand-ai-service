@@ -1339,19 +1339,46 @@ class CaregiverImpactRequest(BaseModel):
     caregiver_id: int
 
 
+def _ontology_kpi() -> dict[str, Any] | None:
+    """MCP 자연어 질문 처리율(mcp_kpi.compute) 요약 — /admin/ontology 의 KPI 카드용.
+
+    호출 로그 기반이라 Fuseki 와 무관하게 동작한다. 못 푼 질문 원문이 포함되므로
+    관리자 화면(인증 뒤)까지만 내보낸다 — 이 요약을 공개 API 에 싣지 말 것(CG-1).
+    실패해도 화면을 막지 않는다(kpi=None 이면 카드가 안 보일 뿐)."""
+    try:
+        import mcp_kpi
+        k = mcp_kpi.compute(days=30)
+        return {
+            "days": k["period"]["days"],
+            "questions": k["questions"],
+            "processed": k["processed"],
+            "rate": k["rate"],
+            "unprocessed_by_reason": k["unprocessed_by_reason"],
+            "calls": k["calls"],
+            "by_tool": {t: c["calls"] for t, c in k["by_tool"].items()},
+            "unprocessed": [{"question": u["question"], "why": u["why"],
+                             "reason": u["reason"], "ts": u["ts"]}
+                            for u in k["unprocessed"][:5]],
+        }
+    except Exception:                     # noqa: BLE001 — KPI 가 화면을 죽이면 안 된다
+        logger.warning("온톨로지 KPI 계산 실패", exc_info=True)
+        return None
+
+
 @app.post("/ai/ontology/overview", dependencies=[Depends(verify_token)])
 def ontology_overview() -> dict[str, Any]:
     available = ontology.graph_available()
     if not available:
-        # Fuseki 다운 — 빈 표 + 배너. 매칭/STT 와 같은 fail-open 원칙.
+        # Fuseki 다운 — 빈 표 + 배너. 매칭/STT 와 같은 fail-open 원칙. KPI 는 로그 기반이라 그대로 준다.
         return {"available": False, "status": _ontology_status(),
-                "diseases": [], "specialties": [], "caregivers": []}
+                "diseases": [], "specialties": [], "caregivers": [], "kpi": _ontology_kpi()}
     return {
         "available": True,
         "status": _ontology_status(),
         "diseases": ontology.disease_coverage(),
         "specialties": ontology.specialty_supply(),
         "caregivers": ontology.caregiver_directory(),
+        "kpi": _ontology_kpi(),
     }
 
 

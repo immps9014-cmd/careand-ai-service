@@ -464,6 +464,24 @@ except ImportError:                             # stdio 단독 실행(FastAPI �
     APIRouter = None
 
 if APIRouter is not None:
+    import logging
+
+    class _MaskMcpPath(logging.Filter):
+        """uvicorn 접근 로그의 /mcp/<토큰> 경로를 가린다 — Apache 쪽 [path-hidden] 과 같은 이유.
+        토큰 원문은 어디에도 저장하지 않는다(발급 때 한 번만 출력)."""
+        def filter(self, record: logging.LogRecord) -> bool:
+            try:
+                args = record.args
+                if isinstance(args, tuple):
+                    record.args = tuple("/mcp/[path-hidden]"
+                                        if isinstance(a, str) and a.startswith("/mcp/") else a
+                                        for a in args)
+            except Exception:                   # noqa: BLE001 — 로그 필터가 요청을 막으면 안 된다
+                pass
+            return True
+
+    logging.getLogger("uvicorn.access").addFilter(_MaskMcpPath())
+
     router = APIRouter()
 
     async def _mcp(request: Request, path_token: str | None) -> Response:

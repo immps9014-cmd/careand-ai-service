@@ -40,6 +40,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 import l2r  # 매칭 feature·룰점수·L2R 모델 게이팅의 단일 소스
+import pii  # 외부 LLM 전송 전 개인정보 가명 처리
 import ontology  # 온톨로지 SPARQL — 매칭 feature 보강 + STT hotwords 어휘집
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -178,10 +179,21 @@ def _llm_gemini(system: str, user_msg: str, max_tokens: int, temperature: float)
 
 
 def llm_complete(system: str, user_msg: str, max_tokens: int = 1024, temperature: float = 0.3) -> str | None:
-    """활성 프로바이더로 LLM 호출. 키 없음/실패 시 None (호출부가 폴백 처리)."""
+    """활성 프로바이더로 LLM 호출. 키 없음/실패 시 None (호출부가 폴백 처리).
+
+    외부 LLM 으로 나가기 직전에 개인정보를 가명 처리하고(pii.Masker), 답을 받은 뒤 원래 값으로 되돌린다
+    (2026-09-28 — 국외 이전 최소화 ①). 이름은 엔드포인트가 pii.use(req) 로 등록한다.
+    """
+    masker = pii.Masker()
+    masked = masker.mask(user_msg)
+    if masker.count:
+        logger.info("LLM 전송 전 가명 처리 %d건 (provider=%s)", masker.count, LLM_PROVIDER)
+    sys_prompt = system + pii.SYSTEM_NOTE
     if LLM_PROVIDER == "gemini":
-        return _llm_gemini(system, user_msg, max_tokens, temperature)
-    return _llm_anthropic(system, user_msg, max_tokens, temperature)
+        out = _llm_gemini(sys_prompt, masked, max_tokens, temperature)
+    else:
+        out = _llm_anthropic(sys_prompt, masked, max_tokens, temperature)
+    return masker.unmask(out)
 
 
 def llm_complete_json(system: str, user_msg: str, max_tokens: int = 1024) -> dict | None:
@@ -336,6 +348,7 @@ def _match_reco_note(reasons: list[str], domain: str | None) -> str | None:
 
 @app.post("/ai/match/recommend", dependencies=[Depends(verify_token)])
 def match_recommend(req: MatchRecommendRequest) -> dict[str, Any]:
+    pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
     required = set(req.required_skills or [])
     pref = req.preferred_gender
     scored = []
@@ -650,6 +663,7 @@ def _summarize_heuristic(stt_text: str) -> dict[str, Any]:
 
 @app.post("/ai/voice/summarize", dependencies=[Depends(verify_token)])
 def summarize(req: SummarizeRequest) -> dict[str, Any]:
+    pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
     ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
     result = llm_complete_json(
         _SUMMARIZE_SYSTEM,
@@ -711,6 +725,7 @@ def _anomaly_explanation(result: dict[str, Any]) -> str | None:
 
 @app.post("/ai/anomaly/score", dependencies=[Depends(verify_token)])
 def anomaly_score(req: AnomalyFeatures) -> dict[str, Any]:
+    pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
     risks: list[dict[str, Any]] = []
 
     # 1. 영양
@@ -856,6 +871,7 @@ class ChatbotRequest(BaseModel):
 
 @app.post("/ai/chatbot/answer", dependencies=[Depends(verify_token)])
 def chatbot_answer(req: ChatbotRequest) -> dict[str, Any]:
+    pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
     ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
     answer = llm_complete(_CHATBOT_SYSTEM, f"컨텍스트: {ctx}\n\n질문: {req.question}", max_tokens=600)
     if answer:
@@ -1028,6 +1044,7 @@ def _postpartum_rule_answer(req: PostpartumChatRequest) -> str:
 @app.post("/chatbot/postpartum", dependencies=[Depends(verify_token)])
 def chatbot_postpartum(req: PostpartumChatRequest) -> dict[str, Any]:
     """산후조리 챗봇. 응답 형식 {answer, sources}는 백엔드 기대와 일치."""
+    pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
     history_txt = "\n".join(f"{m.role}: {m.content}" for m in req.history[-6:]) or "없음"
     ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
     answer = llm_complete(
@@ -1269,6 +1286,7 @@ def _care_log_template(req: CareLogRequest) -> dict[str, Any]:
 @app.post("/care-log/generate", dependencies=[Depends(verify_token)])
 def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
     """활동 기록 → 보호자/의료진용 일지 생성. LLM 우선, 실패 시 템플릿."""
+    pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
     grouped: dict[str, list[str]] = {}
     for a in req.activities:
         label = _CATEGORY_LABEL.get(a.category, a.category)

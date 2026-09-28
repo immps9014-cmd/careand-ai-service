@@ -81,7 +81,8 @@ class ChipJournalTest(unittest.TestCase):
         self.assertEqual(sum(1 for x in c["chips"] if x["alert"]), 10)
 
     def test_catalog_matches_ttl_source(self):
-        src = json.load(open(os.path.join(os.path.dirname(journal.__file__), "ontology", "care_journal.json"), encoding="utf-8"))
+        with open(os.path.join(os.path.dirname(journal.__file__), "ontology", "care_journal.json"), encoding="utf-8") as f:
+            src = json.load(f)
         self.assertEqual(len({c["id"] for c in src["chips"]}), 55, "칩 코드 중복 없음")
         self.assertEqual(len({c["phrase"] for c in src["chips"]}), 55, "표현조각 중복 없음")
 

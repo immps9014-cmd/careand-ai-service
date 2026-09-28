@@ -35,7 +35,8 @@ SELECT ?code ?label ?cat ?catLabel ?catOrder ?text ?tone ?order ?alert ?alertLab
 
 
 def _from_json() -> dict[str, Any]:
-    d = json.load(open(_SRC, encoding="utf-8"))
+    with open(_SRC, encoding="utf-8") as f:
+        d = json.load(f)
     alerts = {r["id"]: r for r in (ontology.safety_alert_rules() or [])}
     cats = {c["id"]: c for c in d["categories"]}
     chips = []

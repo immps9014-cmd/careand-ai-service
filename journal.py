@@ -103,7 +103,8 @@ def source_text(norm: dict[str, Any], duration_min: int) -> str:
     """사실성 검증의 원문 — 표현조각과 돌봄전문가 메모만. LLM 이 여기 없는 말을 하면 verify 가 잡는다."""
     lines = [f"돌봄 시간 {duration_min}분"]
     for s in norm["sections"]:
-        lines.append(f"{s['category']}: " + " / ".join(i["phrase"] for i in s["items"]))
+        # 칩 라벨도 근거에 넣는다 — LLM 이 의료진용 요약에서 '발열'처럼 라벨로 적어도 원문에 있는 말이 된다
+        lines.append(f"{s['category']}: " + " / ".join(f"{i['label']} — {i['phrase']}" for i in s["items"]))
     if norm["note"]:
         lines.append(f"메모: {norm['note']}")
     return "\n".join(lines)

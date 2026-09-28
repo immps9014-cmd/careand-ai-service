@@ -509,7 +509,7 @@ care:alertSeverity a owl:DatatypeProperty ; rdfs:label "심각도(critical·high
 care:Alert_Fall        a care:SafetyAlert ; rdfs:label "낙상"@ko ; care:alertSeverity "high" ;
     care:alertKeyword "낙상", "넘어지", "넘어졌", "미끄러지", "미끄러졌", "침대에서 떨어" .
 care:Alert_Fever       a care:SafetyAlert ; rdfs:label "발열"@ko ; care:alertSeverity "high" ;
-    care:alertKeyword "발열", "고열", "열이 나", "열이 났", "열이 높" .
+    care:alertKeyword "발열", "고열", "열이 나", "열이 있", "열이 났", "열이 높" .
 care:Alert_Dyspnea     a care:SafetyAlert ; rdfs:label "호흡곤란"@ko ; care:alertSeverity "critical" ;
     care:alertKeyword "호흡곤란", "숨이 차", "숨을 못", "숨쉬기 힘들", "숨쉬기가 힘들" .
 care:Alert_Aspiration  a care:SafetyAlert ; rdfs:label "흡인·사레"@ko ; care:alertSeverity "high" ;

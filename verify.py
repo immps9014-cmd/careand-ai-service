@@ -22,7 +22,7 @@ RISK_REVIEW = 0.25   # 이 이상이면 검수 큐
 # 온톨로지를 못 읽을 때 쓰는 내장본 — ontology/care-domain.ttl 의 care:SafetyAlert 와 같게 유지(기능 42 장애 복원)
 _FALLBACK_ALERTS = [
     {"id": "Alert_Fall", "label": "낙상", "severity": "high", "keywords": ["낙상", "넘어지", "넘어졌", "미끄러지", "미끄러졌", "침대에서 떨어"]},
-    {"id": "Alert_Fever", "label": "발열", "severity": "high", "keywords": ["발열", "고열", "열이 나", "열이 났", "열이 높"]},
+    {"id": "Alert_Fever", "label": "발열", "severity": "high", "keywords": ["발열", "고열", "열이 나", "열이 있", "열이 났", "열이 높"]},
     {"id": "Alert_Dyspnea", "label": "호흡곤란", "severity": "critical", "keywords": ["호흡곤란", "숨이 차", "숨을 못", "숨쉬기 힘들", "숨쉬기가 힘들"]},
     {"id": "Alert_Aspiration", "label": "흡인·사레", "severity": "high", "keywords": ["흡인", "사레", "기도가 막"]},
     {"id": "Alert_Consciousness", "label": "의식저하", "severity": "critical", "keywords": ["의식저하", "의식이 없", "의식을 잃", "반응이 없", "깨워도 안"]},

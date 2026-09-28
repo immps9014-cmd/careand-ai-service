@@ -494,3 +494,41 @@ care:Stroke    care:code "뇌졸중" ; care:requiresSpecialty care:SpPressureUlc
 # 같은 집합이어야 "가산을 받는 상태가 실제로 기록되는가" 를 질의할 수 있다.
 care:Suction    a care:HealthStatus ; rdfs:label "석션"@ko .
 care:Immobility a care:LifeStatus   ; rdfs:label "거동불가"@ko .
+
+# ───────────────────────── 보호자 안전 알림 10종 (사업계획서 기능 41 · triggersAlert) ─────────────────────────
+# 돌봄 기록(음성 전사·활동 메모)에 아래 표현이 나오면 보호자·운영자에게 즉시 알리고 일지를 검수로 돌린다(결정적 규칙).
+# 판정 코드는 careand-ai-service/verify.py — 이 정의를 SPARQL 로 읽고, Fuseki 가 없으면 같은 목록의 내장본을 쓴다(기능 42).
+# "넘어지지 않게" 처럼 바로 뒤에 부정이 오면 알리지 않는다. 표현을 바꾸면 verify.py 내장본도 같이 고칠 것.
+care:SafetyAlert a owl:Class ; rdfs:label "보호자 안전 알림"@ko ;
+    rdfs:comment "돌봄 기록에서 감지되면 보호자·운영자에게 즉시 알리는 위험 상황."@ko .
+care:triggersAlert a owl:ObjectProperty ; rdfs:label "알림 유발"@ko ;
+    rdfs:domain care:CareTerm ; rdfs:range care:SafetyAlert .
+care:alertKeyword a owl:DatatypeProperty ; rdfs:label "감지 표현"@ko ; rdfs:domain care:SafetyAlert .
+care:alertSeverity a owl:DatatypeProperty ; rdfs:label "심각도(critical·high)"@ko ; rdfs:domain care:SafetyAlert .
+
+care:Alert_Fall        a care:SafetyAlert ; rdfs:label "낙상"@ko ; care:alertSeverity "high" ;
+    care:alertKeyword "낙상", "넘어지", "넘어졌", "미끄러지", "미끄러졌", "침대에서 떨어" .
+care:Alert_Fever       a care:SafetyAlert ; rdfs:label "발열"@ko ; care:alertSeverity "high" ;
+    care:alertKeyword "발열", "고열", "열이 나", "열이 났", "열이 높" .
+care:Alert_Dyspnea     a care:SafetyAlert ; rdfs:label "호흡곤란"@ko ; care:alertSeverity "critical" ;
+    care:alertKeyword "호흡곤란", "숨이 차", "숨을 못", "숨쉬기 힘들", "숨쉬기가 힘들" .
+care:Alert_Aspiration  a care:SafetyAlert ; rdfs:label "흡인·사레"@ko ; care:alertSeverity "high" ;
+    care:alertKeyword "흡인", "사레", "기도가 막" .
+care:Alert_Consciousness a care:SafetyAlert ; rdfs:label "의식저하"@ko ; care:alertSeverity "critical" ;
+    care:alertKeyword "의식저하", "의식이 없", "의식을 잃", "반응이 없", "깨워도 안" .
+care:Alert_Seizure     a care:SafetyAlert ; rdfs:label "경련"@ko ; care:alertSeverity "critical" ;
+    care:alertKeyword "경련", "발작" .
+care:Alert_ChestPain   a care:SafetyAlert ; rdfs:label "흉통"@ko ; care:alertSeverity "critical" ;
+    care:alertKeyword "흉통", "가슴 통증", "가슴이 아프", "가슴을 움켜" .
+care:Alert_Dehydration a care:SafetyAlert ; rdfs:label "탈수"@ko ; care:alertSeverity "high" ;
+    care:alertKeyword "탈수", "소변을 거의", "소변이 거의" .
+care:Alert_Jaundice    a care:SafetyAlert ; rdfs:label "황달(신생아)"@ko ; care:alertSeverity "high" ;
+    care:alertKeyword "황달", "눈이 노랗", "피부가 노랗" .
+care:Alert_Crisis      a care:SafetyAlert ; rdfs:label "위기징후(자해·자살)"@ko ; care:alertSeverity "critical" ;
+    care:alertKeyword "죽고 싶", "자살", "자해", "극단적 선택", "살고 싶지 않" .
+
+care:Fall        care:triggersAlert care:Alert_Fall .
+care:Fever       care:triggersAlert care:Alert_Fever .
+care:Dyspnea     care:triggersAlert care:Alert_Dyspnea .
+care:Aspiration  care:triggersAlert care:Alert_Aspiration .
+care:Dehydration care:triggersAlert care:Alert_Dehydration .

@@ -150,12 +150,42 @@ def care_term_vocabulary() -> frozenset[str]:
     return _vocab_cache
 
 
+_SAFETY_ALERT_QUERY = """
+PREFIX care: <http://caren.aiclaude.kr/ontology#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?alert ?label ?severity ?keyword FROM <%s> WHERE {
+  ?alert a care:SafetyAlert ; rdfs:label ?label ; care:alertSeverity ?severity ; care:alertKeyword ?keyword .
+}
+""" % GRAPH_SCHEMA
+_alert_cache = None
+
+
+def safety_alert_rules():
+    """보호자 안전 알림 10종(기능 41) — [{id, label, severity, keywords}]. 조회 실패 시 None(verify.py 내장본 사용).
+    한 번 성공하면 프로세스 동안 재사용(reset_cache 로 무효화)."""
+    global _alert_cache
+    if _alert_cache is not None:
+        return _alert_cache
+    bindings = _sparql_select(_SAFETY_ALERT_QUERY)
+    if not bindings:
+        return None
+    rules = {}
+    for b in bindings:
+        a = b["alert"]["value"].rsplit("#", 1)[-1]
+        r = rules.setdefault(a, {"id": a, "label": b["label"]["value"], "severity": b["severity"]["value"], "keywords": []})
+        r["keywords"].append(b["keyword"]["value"])
+    _alert_cache = list(rules.values())
+    return _alert_cache
+
+
 def reset_cache() -> None:
     """Fuseki 데이터 갱신 후(재적재 등) 테스트/운영에서 캐시 무효화용."""
     global _vocab_cache
     _cache.clear()
     _assoc_cache.clear()
     _vocab_cache = None
+    global _alert_cache
+    _alert_cache = None
 
 
 # ═════════════════════════════════════════════════════════════════════════════

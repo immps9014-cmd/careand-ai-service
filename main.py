@@ -41,6 +41,7 @@ from pydantic import BaseModel
 
 import l2r  # 매칭 feature·룰점수·L2R 모델 게이팅의 단일 소스
 import pii  # 외부 LLM 전송 전 개인정보 가명 처리
+import verify  # 일지 사실성 검증·안전 알림(기능 29·41)
 import ontology  # 온톨로지 SPARQL — 매칭 feature 보강 + STT hotwords 어휘집
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -661,6 +662,20 @@ def _summarize_heuristic(stt_text: str) -> dict[str, Any]:
     }
 
 
+def _verified(result: dict[str, Any], source: str) -> dict[str, Any]:
+    """일지 결과에 사실성 검증·안전 알림을 붙인다(기능 29·41). 민감정보는 보호자용 문장에서 가린다.
+    confidence 는 고정값 대신 1 − 위험도. 백엔드가 verification.needs_review 로 검수 여부를 정한다."""
+    out_text = f"{result.get('guardian_version', '')}\n{result.get('medical_version', '')}"
+    v = verify.verify(out_text, source)
+    if v["sensitive"]:
+        for key in ("guardian_version", "medical_version"):
+            if result.get(key):
+                result[key] = verify.verify(result[key], source)["masked_output"] or result[key]
+    result["confidence"] = round(max(0.0, 1.0 - v["risk"]), 3)
+    result["verification"] = {k: v[k] for k in ("risk", "claims", "unsupported", "sensitive", "alerts", "needs_review", "reasons", "method")}
+    return result
+
+
 @app.post("/ai/voice/summarize", dependencies=[Depends(verify_token)])
 def summarize(req: SummarizeRequest) -> dict[str, Any]:
     pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
@@ -672,10 +687,9 @@ def summarize(req: SummarizeRequest) -> dict[str, Any]:
     )
     if result and result.get("guardian_version"):
         result.setdefault("categorized", {})
-        result["confidence"] = 0.9
         result["model"] = active_model()
-        return result
-    return _summarize_heuristic(req.stt_text)
+        return _verified(result, req.stt_text)
+    return _verified(_summarize_heuristic(req.stt_text), req.stt_text)
 
 
 # ───────────────────────── 4. 이상징후 (룰 기반 실구현) ─────────────────────────
@@ -869,13 +883,21 @@ class ChatbotRequest(BaseModel):
     context: dict[str, Any] = {}
 
 
+# AI 응답 면책 문구 — 사업계획서 3.3 AI 윤리 「의료 진단은 의료인의 진료를 받으십시오」(REQ-N-14)
+MEDICAL_DISCLAIMER = "\n\n※ 참고용 안내이며 의료적 진단을 대신하지 않습니다. 증상이 있거나 걱정되면 의료진과 상담하세요."
+
+
+def _with_disclaimer(answer: str) -> str:
+    return answer if not answer or "의료적 진단을 대신하지" in answer else answer.rstrip() + MEDICAL_DISCLAIMER
+
+
 @app.post("/ai/chatbot/answer", dependencies=[Depends(verify_token)])
 def chatbot_answer(req: ChatbotRequest) -> dict[str, Any]:
     pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
     ctx = json.dumps(req.context, ensure_ascii=False) if req.context else "없음"
     answer = llm_complete(_CHATBOT_SYSTEM, f"컨텍스트: {ctx}\n\n질문: {req.question}", max_tokens=600)
     if answer:
-        return {"answer": answer, "sources": _kb_sources(req.question), "model": active_model()}
+        return {"answer": _with_disclaimer(answer), "sources": _kb_sources(req.question), "model": active_model()}
     return {
         "answer": (
             "지금은 AI 상담 엔진 점검 중이라 정확한 답변을 드리기 어렵습니다. "
@@ -1057,7 +1079,7 @@ def chatbot_postpartum(req: PostpartumChatRequest) -> dict[str, Any]:
         answer = _postpartum_rule_answer(req)
 
     return {
-        "answer": answer,
+        "answer": _with_disclaimer(answer),
         "sources": [
             {
                 "title": "산후조리 표준 가이드",
@@ -1287,6 +1309,9 @@ def _care_log_template(req: CareLogRequest) -> dict[str, Any]:
 def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
     """활동 기록 → 보호자/의료진용 일지 생성. LLM 우선, 실패 시 템플릿."""
     pii.use(req)   # 외부 LLM 전송 시 가릴 이름 등록
+    # 사실성 검증의 원문 = 활동 기록 그대로(분류·메모·돌봄 시간)
+    source = f"돌봄 시간 {req.duration_min}분\n" + "\n".join(
+        f"{_CATEGORY_LABEL.get(a.category, a.category)} {a.memo or ''}" for a in req.activities)
     grouped: dict[str, list[str]] = {}
     for a in req.activities:
         label = _CATEGORY_LABEL.get(a.category, a.category)
@@ -1306,15 +1331,14 @@ def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
             max_tokens=800,
         )
         if result and result.get("guardian_version") and result.get("medical_version"):
-            return {
+            return _verified({
                 "guardian_version": result["guardian_version"],
                 "medical_version": result["medical_version"],
                 "categorized": grouped,
-                "confidence": 0.92,
                 "model": active_model(),
-            }
+            }, source)
 
-    return _care_log_template(req)
+    return _verified(_care_log_template(req), source)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

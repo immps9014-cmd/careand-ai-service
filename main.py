@@ -43,6 +43,7 @@ import l2r  # 매칭 feature·룰점수·L2R 모델 게이팅의 단일 소스
 import pii  # 외부 LLM 전송 전 개인정보 가명 처리
 import verify  # 일지 사실성 검증·안전 알림(기능 29·41)
 import ontology  # 온톨로지 SPARQL — 매칭 feature 보강 + STT hotwords 어휘집
+import journal  # 칩 기반 케어일지(기능 40) — care-journal 계층
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -1339,6 +1340,60 @@ def care_log_generate(req: CareLogRequest) -> dict[str, Any]:
             }, source)
 
     return _verified(_care_log_template(req), source)
+
+
+# ───────────────────────── 칩 기반 케어일지 (기능 37·40, S5) ─────────────────────────
+
+class ChipLogRequest(BaseModel):
+    session_id: int | None = None
+    service_domain: str | None = None
+    senior_name: str = "어르신"
+    duration_min: int = 0
+    chips: list[str] = []
+    note: str | None = None
+
+
+@app.get("/care-log/chips/catalog", dependencies=[Depends(verify_token)])
+def care_log_chip_catalog() -> dict[str, Any]:
+    """칩 55개 목록(분류·표현조각·안전 알림) — 앱의 칩 선택 화면용. source=sparql|json(폴백)."""
+    return journal.catalog()
+
+
+@app.post("/care-log/chips", dependencies=[Depends(verify_token)])
+def care_log_from_chips(req: ChipLogRequest) -> dict[str, Any]:
+    """칩 → SPARQL 조회 → 정규화 JSON → LLM 조립. LLM 이 없으면 표현조각 조립. 위험 칩은 결정적 안전 알림."""
+    pii.use(req)
+    norm = journal.normalize(req.chips, req.note)
+    source = journal.source_text(norm, req.duration_min)
+    result = None
+    if norm["sections"] and llm_available():
+        payload = {"대상자": req.senior_name, "돌봄시간_분": req.duration_min, "도메인": req.service_domain,
+                   "sections": [{"category": s["category"], "items": [i["phrase"] for i in s["items"]]} for s in norm["sections"]],
+                   "alerts": [a["label"] for a in norm["alerts"]], "note": norm["note"]}
+        r = llm_complete_json(journal.SYSTEM, json.dumps(payload, ensure_ascii=False), max_tokens=800)
+        if r and r.get("guardian_version") and r.get("medical_version"):
+            extra_claims = journal.unsupported_reassurance(r["guardian_version"] + "\n" + r["medical_version"], source)
+            if extra_claims:
+                # 근거 없는 안심 문구 — 알림 상황을 가릴 수 있어 LLM 결과를 버리고 표현조각 조립본을 쓴다
+                logger.info("칩 일지: LLM 이 근거 없는 안심 문구를 넣어 폴백(%s)", extra_claims)
+            else:
+                result = {"guardian_version": r["guardian_version"], "medical_version": r["medical_version"], "model": active_model()}
+    if result is None:
+        result = {**journal.template(norm, req.senior_name, req.duration_min), "model": "chip-template"}
+    result["categorized"] = {s["category"]: [i["label"] for i in s["items"]] for s in norm["sections"]}
+    result["normalized"] = norm
+    out = _verified(result, source)
+    # 위험 칩 알림은 원문 감지와 합쳐 확정(같은 알림은 한 번)
+    v = out["verification"]
+    ids = {a["id"] for a in v["alerts"]}
+    extra = [a for a in norm["alerts"] if a["id"] not in ids]
+    if extra:
+        v["alerts"] = extra + v["alerts"]
+        v["reasons"] = [r for r in v["reasons"] if not r.startswith("안전 알림")]
+        v["reasons"].insert(0, "안전 알림: " + ", ".join(a["label"] for a in v["alerts"]))
+        v["needs_review"] = True
+    v["method"] = v.get("method", "rule-v1") + "+chips"
+    return out
 
 
 # ═════════════════════════════════════════════════════════════════════════════

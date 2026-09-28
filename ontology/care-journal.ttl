@@ -1,0 +1,486 @@
+# 자동 생성 — gen_care_journal.py (원본 care_journal.json). 직접 고치지 말 것.
+@prefix care: <http://caren.aiclaude.kr/ontology#> .
+@prefix cj:   <http://caren.aiclaude.kr/ontology/journal#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+cj:Chip a owl:Class ; rdfs:label "케어일지 칩"@ko ; rdfs:comment "돌봄전문가가 눌러 기록하는 관찰·수행 단위(기능 40)."@ko .
+cj:Phrase a owl:Class ; rdfs:label "표현조각"@ko ; rdfs:comment "칩 하나에 대응하는 보호자용 문장 조각. LLM 은 이것만 이어 붙여 일지를 만든다."@ko .
+cj:ChipCategory a owl:Class ; rdfs:label "칩 분류"@ko .
+cj:code a owl:DatatypeProperty ; rdfs:label "칩 코드(저장값)"@ko ; rdfs:domain cj:Chip .
+cj:inCategory a owl:ObjectProperty ; rdfs:domain cj:Chip ; rdfs:range cj:ChipCategory .
+cj:hasPhrase a owl:ObjectProperty ; rdfs:domain cj:Chip ; rdfs:range cj:Phrase .
+cj:text a owl:DatatypeProperty ; rdfs:domain cj:Phrase .
+cj:tone a owl:DatatypeProperty ; rdfs:label "어조(good·neutral·caution·alert)"@ko .
+cj:order a owl:DatatypeProperty .
+cj:raisesAlert a owl:ObjectProperty ; rdfs:label "안전 알림 유발"@ko ; rdfs:domain cj:Chip ; rdfs:range care:SafetyAlert .
+cj:observes a owl:ObjectProperty ; rdfs:label "관찰 케어용어"@ko ; rdfs:domain cj:Chip ; rdfs:range care:CareTerm .
+
+cj:Cat_Meal a cj:ChipCategory ; rdfs:label "식사·수분"@ko ; cj:order 1 .
+cj:Cat_Toilet a cj:ChipCategory ; rdfs:label "배설"@ko ; cj:order 2 .
+cj:Cat_Sleep a cj:ChipCategory ; rdfs:label "수면·휴식"@ko ; cj:order 3 .
+cj:Cat_Medication a cj:ChipCategory ; rdfs:label "투약·측정"@ko ; cj:order 4 .
+cj:Cat_Activity a cj:ChipCategory ; rdfs:label "활동·운동"@ko ; cj:order 5 .
+cj:Cat_Hygiene a cj:ChipCategory ; rdfs:label "위생·청결"@ko ; cj:order 6 .
+cj:Cat_Mood a cj:ChipCategory ; rdfs:label "정서·소통"@ko ; cj:order 7 .
+cj:Cat_Health a cj:ChipCategory ; rdfs:label "건강 관찰"@ko ; cj:order 8 .
+cj:Cat_Safety a cj:ChipCategory ; rdfs:label "안전 알림"@ko ; cj:order 9 .
+cj:Cat_Living a cj:ChipCategory ; rdfs:label "생활 지원"@ko ; cj:order 10 .
+cj:Cat_Newborn a cj:ChipCategory ; rdfs:label "산모·신생아"@ko ; cj:order 11 .
+
+cj:Chip_MealAll a cj:Chip ;
+    cj:code "MealAll" ;
+    rdfs:label "식사 모두 드심"@ko ;
+    cj:inCategory cj:Cat_Meal ;
+    cj:hasPhrase cj:Phrase_MealAll ;
+    cj:tone "good" ;
+    cj:order 1 .
+cj:Phrase_MealAll a cj:Phrase ; cj:text "식사를 남김없이 맛있게 드셨어요"@ko .
+cj:Chip_MealHalf a cj:Chip ;
+    cj:code "MealHalf" ;
+    rdfs:label "식사 절반 정도"@ko ;
+    cj:inCategory cj:Cat_Meal ;
+    cj:hasPhrase cj:Phrase_MealHalf ;
+    cj:tone "neutral" ;
+    cj:order 2 .
+cj:Phrase_MealHalf a cj:Phrase ; cj:text "식사는 절반 정도 드셨어요"@ko .
+cj:Chip_MealLittle a cj:Chip ;
+    cj:code "MealLittle" ;
+    rdfs:label "식사 조금만"@ko ;
+    cj:inCategory cj:Cat_Meal ;
+    cj:hasPhrase cj:Phrase_MealLittle ;
+    cj:tone "caution" ;
+    cj:order 3 .
+cj:Phrase_MealLittle a cj:Phrase ; cj:text "입맛이 없으신지 식사를 조금만 드셨어요"@ko .
+cj:Chip_MealRefuse a cj:Chip ;
+    cj:code "MealRefuse" ;
+    rdfs:label "식사 거부"@ko ;
+    cj:inCategory cj:Cat_Meal ;
+    cj:hasPhrase cj:Phrase_MealRefuse ;
+    cj:tone "caution" ;
+    cj:order 4 .
+cj:Phrase_MealRefuse a cj:Phrase ; cj:text "오늘은 식사를 원하지 않으셔서 드시지 않았어요"@ko .
+cj:Chip_FluidGood a cj:Chip ;
+    cj:code "FluidGood" ;
+    rdfs:label "수분 충분"@ko ;
+    cj:inCategory cj:Cat_Meal ;
+    cj:hasPhrase cj:Phrase_FluidGood ;
+    cj:tone "good" ;
+    cj:order 5 .
+cj:Phrase_FluidGood a cj:Phrase ; cj:text "물과 음료를 충분히 드셨어요"@ko .
+cj:Chip_BowelNormal a cj:Chip ;
+    cj:code "BowelNormal" ;
+    rdfs:label "배변 정상"@ko ;
+    cj:inCategory cj:Cat_Toilet ;
+    cj:hasPhrase cj:Phrase_BowelNormal ;
+    cj:tone "good" ;
+    cj:order 6 .
+cj:Phrase_BowelNormal a cj:Phrase ; cj:text "배변은 평소처럼 보셨어요"@ko .
+cj:Chip_Constipation a cj:Chip ;
+    cj:code "Constipation" ;
+    rdfs:label "변비"@ko ;
+    cj:inCategory cj:Cat_Toilet ;
+    cj:hasPhrase cj:Phrase_Constipation ;
+    cj:tone "caution" ;
+    cj:order 7 .
+cj:Phrase_Constipation a cj:Phrase ; cj:text "변을 보지 못하셔서 변비가 있는지 살펴보고 있어요"@ko .
+cj:Chip_Diarrhea a cj:Chip ;
+    cj:code "Diarrhea" ;
+    rdfs:label "설사"@ko ;
+    cj:inCategory cj:Cat_Toilet ;
+    cj:hasPhrase cj:Phrase_Diarrhea ;
+    cj:tone "caution" ;
+    cj:order 8 .
+cj:Phrase_Diarrhea a cj:Phrase ; cj:text "묽은 변을 보셔서 수분을 더 챙겨 드렸어요"@ko .
+cj:Chip_UrineNormal a cj:Chip ;
+    cj:code "UrineNormal" ;
+    rdfs:label "소변 정상"@ko ;
+    cj:inCategory cj:Cat_Toilet ;
+    cj:hasPhrase cj:Phrase_UrineNormal ;
+    cj:tone "good" ;
+    cj:order 9 .
+cj:Phrase_UrineNormal a cj:Phrase ; cj:text "소변은 평소처럼 보셨어요"@ko .
+cj:Chip_DiaperChange a cj:Chip ;
+    cj:code "DiaperChange" ;
+    rdfs:label "기저귀 교체"@ko ;
+    cj:inCategory cj:Cat_Toilet ;
+    cj:hasPhrase cj:Phrase_DiaperChange ;
+    cj:tone "neutral" ;
+    cj:order 10 .
+cj:Phrase_DiaperChange a cj:Phrase ; cj:text "기저귀를 때맞춰 갈아 드리고 피부를 깨끗이 닦아 드렸어요"@ko .
+cj:Chip_SleepWell a cj:Chip ;
+    cj:code "SleepWell" ;
+    rdfs:label "숙면"@ko ;
+    cj:inCategory cj:Cat_Sleep ;
+    cj:hasPhrase cj:Phrase_SleepWell ;
+    cj:tone "good" ;
+    cj:order 11 .
+cj:Phrase_SleepWell a cj:Phrase ; cj:text "편안하게 푹 주무셨어요"@ko .
+cj:Chip_Nap a cj:Chip ;
+    cj:code "Nap" ;
+    rdfs:label "낮잠"@ko ;
+    cj:inCategory cj:Cat_Sleep ;
+    cj:hasPhrase cj:Phrase_Nap ;
+    cj:tone "neutral" ;
+    cj:order 12 .
+cj:Phrase_Nap a cj:Phrase ; cj:text "낮에 잠시 낮잠을 주무셨어요"@ko .
+cj:Chip_SleepPoor a cj:Chip ;
+    cj:code "SleepPoor" ;
+    rdfs:label "잠 설침"@ko ;
+    cj:inCategory cj:Cat_Sleep ;
+    cj:hasPhrase cj:Phrase_SleepPoor ;
+    cj:tone "caution" ;
+    cj:order 13 .
+cj:Phrase_SleepPoor a cj:Phrase ; cj:text "잠을 깊이 못 주무시고 자주 깨셨어요"@ko .
+cj:Chip_RestCalm a cj:Chip ;
+    cj:code "RestCalm" ;
+    rdfs:label "편안히 휴식"@ko ;
+    cj:inCategory cj:Cat_Sleep ;
+    cj:hasPhrase cj:Phrase_RestCalm ;
+    cj:tone "good" ;
+    cj:order 14 .
+cj:Phrase_RestCalm a cj:Phrase ; cj:text "편안하게 쉬시며 안정된 시간을 보내셨어요"@ko .
+cj:Chip_MedTaken a cj:Chip ;
+    cj:code "MedTaken" ;
+    rdfs:label "복약 완료"@ko ;
+    cj:inCategory cj:Cat_Medication ;
+    cj:hasPhrase cj:Phrase_MedTaken ;
+    cj:tone "good" ;
+    cj:order 15 .
+cj:Phrase_MedTaken a cj:Phrase ; cj:text "정해진 약을 시간 맞춰 드셨어요"@ko .
+cj:Chip_MedRefused a cj:Chip ;
+    cj:code "MedRefused" ;
+    rdfs:label "복약 거부"@ko ;
+    cj:inCategory cj:Cat_Medication ;
+    cj:hasPhrase cj:Phrase_MedRefused ;
+    cj:tone "caution" ;
+    cj:order 16 .
+cj:Phrase_MedRefused a cj:Phrase ; cj:text "약을 드시기 싫어하셔서 드시지 않았어요"@ko .
+cj:Chip_VitalChecked a cj:Chip ;
+    cj:code "VitalChecked" ;
+    rdfs:label "혈압·혈당 측정"@ko ;
+    cj:inCategory cj:Cat_Medication ;
+    cj:hasPhrase cj:Phrase_VitalChecked ;
+    cj:tone "neutral" ;
+    cj:order 17 .
+cj:Phrase_VitalChecked a cj:Phrase ; cj:text "혈압과 혈당을 재어 기록해 두었어요"@ko .
+cj:Chip_Ointment a cj:Chip ;
+    cj:code "Ointment" ;
+    rdfs:label "연고·파스"@ko ;
+    cj:inCategory cj:Cat_Medication ;
+    cj:hasPhrase cj:Phrase_Ointment ;
+    cj:tone "neutral" ;
+    cj:order 18 .
+cj:Phrase_Ointment a cj:Phrase ; cj:text "필요한 곳에 연고를 발라 드렸어요"@ko .
+cj:Chip_Walk a cj:Chip ;
+    cj:code "Walk" ;
+    rdfs:label "산책"@ko ;
+    cj:inCategory cj:Cat_Activity ;
+    cj:hasPhrase cj:Phrase_Walk ;
+    cj:tone "good" ;
+    cj:order 19 .
+cj:Phrase_Walk a cj:Phrase ; cj:text "바깥 공기를 쐬며 함께 산책했어요"@ko .
+cj:Chip_IndoorWalk a cj:Chip ;
+    cj:code "IndoorWalk" ;
+    rdfs:label "실내 걷기"@ko ;
+    cj:inCategory cj:Cat_Activity ;
+    cj:hasPhrase cj:Phrase_IndoorWalk ;
+    cj:tone "good" ;
+    cj:order 20 .
+cj:Phrase_IndoorWalk a cj:Phrase ; cj:text "실내에서 천천히 걷기 운동을 하셨어요"@ko .
+cj:Chip_JointExercise a cj:Chip ;
+    cj:code "JointExercise" ;
+    rdfs:label "관절 운동"@ko ;
+    cj:inCategory cj:Cat_Activity ;
+    cj:hasPhrase cj:Phrase_JointExercise ;
+    cj:tone "good" ;
+    cj:order 21 .
+cj:Phrase_JointExercise a cj:Phrase ; cj:text "손발과 관절을 풀어 주는 운동을 함께 했어요"@ko .
+cj:Chip_Cognitive a cj:Chip ;
+    cj:code "Cognitive" ;
+    rdfs:label "인지 활동"@ko ;
+    cj:inCategory cj:Cat_Activity ;
+    cj:hasPhrase cj:Phrase_Cognitive ;
+    cj:tone "good" ;
+    cj:order 22 .
+cj:Phrase_Cognitive a cj:Phrase ; cj:text "색칠·퍼즐 같은 인지 활동을 즐겁게 하셨어요"@ko .
+cj:Chip_Leisure a cj:Chip ;
+    cj:code "Leisure" ;
+    rdfs:label "여가 활동"@ko ;
+    cj:inCategory cj:Cat_Activity ;
+    cj:hasPhrase cj:Phrase_Leisure ;
+    cj:tone "good" ;
+    cj:order 23 .
+cj:Phrase_Leisure a cj:Phrase ; cj:text "좋아하시는 음악과 TV를 보며 여가를 보내셨어요"@ko .
+cj:Chip_FaceWash a cj:Chip ;
+    cj:code "FaceWash" ;
+    rdfs:label "세면"@ko ;
+    cj:inCategory cj:Cat_Hygiene ;
+    cj:hasPhrase cj:Phrase_FaceWash ;
+    cj:tone "neutral" ;
+    cj:order 24 .
+cj:Phrase_FaceWash a cj:Phrase ; cj:text "세수와 손 씻기를 도와 드렸어요"@ko .
+cj:Chip_Bath a cj:Chip ;
+    cj:code "Bath" ;
+    rdfs:label "목욕"@ko ;
+    cj:inCategory cj:Cat_Hygiene ;
+    cj:hasPhrase cj:Phrase_Bath ;
+    cj:tone "good" ;
+    cj:order 25 .
+cj:Phrase_Bath a cj:Phrase ; cj:text "목욕을 개운하게 도와 드렸어요"@ko .
+cj:Chip_OralCare a cj:Chip ;
+    cj:code "OralCare" ;
+    rdfs:label "구강 관리"@ko ;
+    cj:inCategory cj:Cat_Hygiene ;
+    cj:hasPhrase cj:Phrase_OralCare ;
+    cj:tone "neutral" ;
+    cj:order 26 .
+cj:Phrase_OralCare a cj:Phrase ; cj:text "양치와 틀니 관리를 해 드렸어요"@ko .
+cj:Chip_HairWash a cj:Chip ;
+    cj:code "HairWash" ;
+    rdfs:label "머리 감기"@ko ;
+    cj:inCategory cj:Cat_Hygiene ;
+    cj:hasPhrase cj:Phrase_HairWash ;
+    cj:tone "neutral" ;
+    cj:order 27 .
+cj:Phrase_HairWash a cj:Phrase ; cj:text "머리를 감겨 드리고 말려 드렸어요"@ko .
+cj:Chip_ChangeClothes a cj:Chip ;
+    cj:code "ChangeClothes" ;
+    rdfs:label "옷 갈아입기"@ko ;
+    cj:inCategory cj:Cat_Hygiene ;
+    cj:hasPhrase cj:Phrase_ChangeClothes ;
+    cj:tone "neutral" ;
+    cj:order 28 .
+cj:Phrase_ChangeClothes a cj:Phrase ; cj:text "깨끗한 옷으로 갈아입혀 드렸어요"@ko .
+cj:Chip_MoodGood a cj:Chip ;
+    cj:code "MoodGood" ;
+    rdfs:label "기분 좋음"@ko ;
+    cj:inCategory cj:Cat_Mood ;
+    cj:hasPhrase cj:Phrase_MoodGood ;
+    cj:tone "good" ;
+    cj:order 29 .
+cj:Phrase_MoodGood a cj:Phrase ; cj:text "기분이 좋으시고 자주 웃으셨어요"@ko .
+cj:Chip_Chatty a cj:Chip ;
+    cj:code "Chatty" ;
+    rdfs:label "대화 즐거워함"@ko ;
+    cj:inCategory cj:Cat_Mood ;
+    cj:hasPhrase cj:Phrase_Chatty ;
+    cj:tone "good" ;
+    cj:order 30 .
+cj:Phrase_Chatty a cj:Phrase ; cj:text "옛날이야기를 들려주시며 대화를 즐거워하셨어요"@ko .
+cj:Chip_Anxious a cj:Chip ;
+    cj:code "Anxious" ;
+    rdfs:label "불안해함"@ko ;
+    cj:inCategory cj:Cat_Mood ;
+    cj:hasPhrase cj:Phrase_Anxious ;
+    cj:tone "caution" ;
+    cj:order 31 .
+cj:Phrase_Anxious a cj:Phrase ; cj:text "조금 불안해하셔서 곁에서 안심시켜 드렸어요"@ko .
+cj:Chip_Down a cj:Chip ;
+    cj:code "Down" ;
+    rdfs:label "우울해 보임"@ko ;
+    cj:inCategory cj:Cat_Mood ;
+    cj:hasPhrase cj:Phrase_Down ;
+    cj:tone "caution" ;
+    cj:order 32 .
+cj:Phrase_Down a cj:Phrase ; cj:text "기운이 없고 우울해 보이셔서 말벗이 되어 드렸어요"@ko .
+cj:Chip_Irritable a cj:Chip ;
+    cj:code "Irritable" ;
+    rdfs:label "예민함"@ko ;
+    cj:inCategory cj:Cat_Mood ;
+    cj:hasPhrase cj:Phrase_Irritable ;
+    cj:tone "caution" ;
+    cj:order 33 .
+cj:Phrase_Irritable a cj:Phrase ; cj:text "예민하신 모습이 있어 차분히 기다려 드렸어요"@ko .
+cj:Chip_ConditionGood a cj:Chip ;
+    cj:code "ConditionGood" ;
+    rdfs:label "컨디션 좋음"@ko ;
+    cj:inCategory cj:Cat_Health ;
+    cj:hasPhrase cj:Phrase_ConditionGood ;
+    cj:tone "good" ;
+    cj:order 34 .
+cj:Phrase_ConditionGood a cj:Phrase ; cj:text "전반적으로 컨디션이 좋아 보이셨어요"@ko .
+cj:Chip_Cough a cj:Chip ;
+    cj:code "Cough" ;
+    rdfs:label "기침"@ko ;
+    cj:inCategory cj:Cat_Health ;
+    cj:hasPhrase cj:Phrase_Cough ;
+    cj:tone "caution" ;
+    cj:order 35 .
+cj:Phrase_Cough a cj:Phrase ; cj:text "기침을 하셔서 따뜻한 물을 챙겨 드렸어요"@ko .
+cj:Chip_PainComplaint a cj:Chip ;
+    cj:code "PainComplaint" ;
+    rdfs:label "통증 호소"@ko ;
+    cj:inCategory cj:Cat_Health ;
+    cj:hasPhrase cj:Phrase_PainComplaint ;
+    cj:tone "caution" ;
+    cj:order 36 .
+cj:Phrase_PainComplaint a cj:Phrase ; cj:text "아프신 곳이 있다고 하셔서 살펴보았어요"@ko .
+cj:Chip_SkinCare a cj:Chip ;
+    cj:code "SkinCare" ;
+    rdfs:label "피부·욕창 주의"@ko ;
+    cj:inCategory cj:Cat_Health ;
+    cj:hasPhrase cj:Phrase_SkinCare ;
+    cj:tone "caution" ;
+    cj:order 37 .
+cj:Phrase_SkinCare a cj:Phrase ; cj:text "피부가 붉어진 곳이 있어 자세를 자주 바꿔 드렸어요"@ko .
+cj:Chip_ChipFall a cj:Chip ;
+    cj:code "ChipFall" ;
+    rdfs:label "낙상"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipFall ;
+    cj:tone "alert" ;
+    cj:order 38 ;
+    cj:raisesAlert care:Alert_Fall ;
+    cj:observes care:Fall .
+cj:Phrase_ChipFall a cj:Phrase ; cj:text "넘어지는 일이 있어 다친 곳이 없는지 확인했어요"@ko .
+cj:Chip_ChipFever a cj:Chip ;
+    cj:code "ChipFever" ;
+    rdfs:label "발열"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipFever ;
+    cj:tone "alert" ;
+    cj:order 39 ;
+    cj:raisesAlert care:Alert_Fever ;
+    cj:observes care:Fever .
+cj:Phrase_ChipFever a cj:Phrase ; cj:text "열이 있어 체온을 재고 시원하게 해 드렸어요"@ko .
+cj:Chip_ChipDyspnea a cj:Chip ;
+    cj:code "ChipDyspnea" ;
+    rdfs:label "호흡곤란"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipDyspnea ;
+    cj:tone "alert" ;
+    cj:order 40 ;
+    cj:raisesAlert care:Alert_Dyspnea ;
+    cj:observes care:Dyspnea .
+cj:Phrase_ChipDyspnea a cj:Phrase ; cj:text "숨쉬기 힘들어하셔서 자세를 바로 하고 상태를 지켜보았어요"@ko .
+cj:Chip_ChipAspiration a cj:Chip ;
+    cj:code "ChipAspiration" ;
+    rdfs:label "사레·흡인"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipAspiration ;
+    cj:tone "alert" ;
+    cj:order 41 ;
+    cj:raisesAlert care:Alert_Aspiration ;
+    cj:observes care:Aspiration .
+cj:Phrase_ChipAspiration a cj:Phrase ; cj:text "식사 중 사레가 들려 등을 두드려 드리고 살펴보았어요"@ko .
+cj:Chip_ChipConsciousness a cj:Chip ;
+    cj:code "ChipConsciousness" ;
+    rdfs:label "의식 저하"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipConsciousness ;
+    cj:tone "alert" ;
+    cj:order 42 ;
+    cj:raisesAlert care:Alert_Consciousness .
+cj:Phrase_ChipConsciousness a cj:Phrase ; cj:text "평소보다 반응이 느리고 의식이 흐려 보이셨어요"@ko .
+cj:Chip_ChipSeizure a cj:Chip ;
+    cj:code "ChipSeizure" ;
+    rdfs:label "경련"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipSeizure ;
+    cj:tone "alert" ;
+    cj:order 43 ;
+    cj:raisesAlert care:Alert_Seizure .
+cj:Phrase_ChipSeizure a cj:Phrase ; cj:text "경련 증상이 있어 주변을 치우고 안전하게 지켜보았어요"@ko .
+cj:Chip_ChipChestPain a cj:Chip ;
+    cj:code "ChipChestPain" ;
+    rdfs:label "흉통"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipChestPain ;
+    cj:tone "alert" ;
+    cj:order 44 ;
+    cj:raisesAlert care:Alert_ChestPain .
+cj:Phrase_ChipChestPain a cj:Phrase ; cj:text "가슴 통증을 말씀하셔서 쉬시게 하고 상태를 살폈어요"@ko .
+cj:Chip_ChipDehydration a cj:Chip ;
+    cj:code "ChipDehydration" ;
+    rdfs:label "탈수 의심"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipDehydration ;
+    cj:tone "alert" ;
+    cj:order 45 ;
+    cj:raisesAlert care:Alert_Dehydration ;
+    cj:observes care:Dehydration .
+cj:Phrase_ChipDehydration a cj:Phrase ; cj:text "소변이 적고 입이 말라 탈수가 걱정되어 수분을 챙겨 드렸어요"@ko .
+cj:Chip_ChipJaundice a cj:Chip ;
+    cj:code "ChipJaundice" ;
+    rdfs:label "신생아 황달"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipJaundice ;
+    cj:tone "alert" ;
+    cj:order 46 ;
+    cj:raisesAlert care:Alert_Jaundice .
+cj:Phrase_ChipJaundice a cj:Phrase ; cj:text "아기 피부와 눈이 노랗게 보여 황달이 있는지 살펴보았어요"@ko .
+cj:Chip_ChipCrisis a cj:Chip ;
+    cj:code "ChipCrisis" ;
+    rdfs:label "위기 징후"@ko ;
+    cj:inCategory cj:Cat_Safety ;
+    cj:hasPhrase cj:Phrase_ChipCrisis ;
+    cj:tone "alert" ;
+    cj:order 47 ;
+    cj:raisesAlert care:Alert_Crisis .
+cj:Phrase_ChipCrisis a cj:Phrase ; cj:text "힘든 마음을 표현하셔서 곁에서 이야기를 들어 드렸어요"@ko .
+cj:Chip_Cleaning a cj:Chip ;
+    cj:code "Cleaning" ;
+    rdfs:label "청소"@ko ;
+    cj:inCategory cj:Cat_Living ;
+    cj:hasPhrase cj:Phrase_Cleaning ;
+    cj:tone "neutral" ;
+    cj:order 48 .
+cj:Phrase_Cleaning a cj:Phrase ; cj:text "생활 공간을 깨끗하게 청소해 드렸어요"@ko .
+cj:Chip_Laundry a cj:Chip ;
+    cj:code "Laundry" ;
+    rdfs:label "세탁"@ko ;
+    cj:inCategory cj:Cat_Living ;
+    cj:hasPhrase cj:Phrase_Laundry ;
+    cj:tone "neutral" ;
+    cj:order 49 .
+cj:Phrase_Laundry a cj:Phrase ; cj:text "빨래를 하고 정리해 드렸어요"@ko .
+cj:Chip_MealPrep a cj:Chip ;
+    cj:code "MealPrep" ;
+    rdfs:label "식사 준비"@ko ;
+    cj:inCategory cj:Cat_Living ;
+    cj:hasPhrase cj:Phrase_MealPrep ;
+    cj:tone "neutral" ;
+    cj:order 50 .
+cj:Phrase_MealPrep a cj:Phrase ; cj:text "드시기 편한 식사를 준비해 드렸어요"@ko .
+cj:Chip_Escort a cj:Chip ;
+    cj:code "Escort" ;
+    rdfs:label "외출·병원 동행"@ko ;
+    cj:inCategory cj:Cat_Living ;
+    cj:hasPhrase cj:Phrase_Escort ;
+    cj:tone "neutral" ;
+    cj:order 51 .
+cj:Phrase_Escort a cj:Phrase ; cj:text "외출과 병원 방문에 함께 다녀왔어요"@ko .
+cj:Chip_Feeding a cj:Chip ;
+    cj:code "Feeding" ;
+    rdfs:label "수유 완료"@ko ;
+    cj:inCategory cj:Cat_Newborn ;
+    cj:hasPhrase cj:Phrase_Feeding ;
+    cj:tone "good" ;
+    cj:order 52 .
+cj:Phrase_Feeding a cj:Phrase ; cj:text "아기가 수유를 잘 마쳤어요"@ko .
+cj:Chip_NewbornBath a cj:Chip ;
+    cj:code "NewbornBath" ;
+    rdfs:label "신생아 목욕"@ko ;
+    cj:inCategory cj:Cat_Newborn ;
+    cj:hasPhrase cj:Phrase_NewbornBath ;
+    cj:tone "good" ;
+    cj:order 53 .
+cj:Phrase_NewbornBath a cj:Phrase ; cj:text "아기 목욕을 안전하게 마쳤어요"@ko .
+cj:Chip_NewbornSleep a cj:Chip ;
+    cj:code "NewbornSleep" ;
+    rdfs:label "아기 숙면"@ko ;
+    cj:inCategory cj:Cat_Newborn ;
+    cj:hasPhrase cj:Phrase_NewbornSleep ;
+    cj:tone "good" ;
+    cj:order 54 .
+cj:Phrase_NewbornSleep a cj:Phrase ; cj:text "아기가 편안하게 잘 잤어요"@ko .
+cj:Chip_MotherRecovery a cj:Chip ;
+    cj:code "MotherRecovery" ;
+    rdfs:label "산모 회복 돌봄"@ko ;
+    cj:inCategory cj:Cat_Newborn ;
+    cj:hasPhrase cj:Phrase_MotherRecovery ;
+    cj:tone "good" ;
+    cj:order 55 .
+cj:Phrase_MotherRecovery a cj:Phrase ; cj:text "산모님이 편히 쉬시도록 좌욕과 회복 식사를 도와 드렸어요"@ko .

@@ -1,0 +1,83 @@
+{
+  "_doc": "care-journal 계층 원본 — 사업계획서 기능 37·40(칩 55개·표현조각 55개). gen_care_journal.py 가 care-journal.ttl 로 바꿔 스키마 그래프에 함께 적재한다. 칩 id 는 앱·DB(care_sessions.journal_chips)에 저장되는 값이라 바꾸지 말 것 — 라벨·표현조각만 고칠 수 있다. alert 는 care-domain.ttl 의 care:SafetyAlert 10종 중 하나.",
+  "categories": [
+    {"id": "Meal",      "label": "식사·수분",   "order": 1},
+    {"id": "Toilet",    "label": "배설",        "order": 2},
+    {"id": "Sleep",     "label": "수면·휴식",   "order": 3},
+    {"id": "Medication","label": "투약·측정",   "order": 4},
+    {"id": "Activity",  "label": "활동·운동",   "order": 5},
+    {"id": "Hygiene",   "label": "위생·청결",   "order": 6},
+    {"id": "Mood",      "label": "정서·소통",   "order": 7},
+    {"id": "Health",    "label": "건강 관찰",   "order": 8},
+    {"id": "Safety",    "label": "안전 알림",   "order": 9},
+    {"id": "Living",    "label": "생활 지원",   "order": 10},
+    {"id": "Newborn",   "label": "산모·신생아", "order": 11}
+  ],
+  "chips": [
+    {"id": "MealAll",        "cat": "Meal", "label": "식사 모두 드심",   "phrase": "식사를 남김없이 맛있게 드셨어요", "tone": "good"},
+    {"id": "MealHalf",       "cat": "Meal", "label": "식사 절반 정도",   "phrase": "식사는 절반 정도 드셨어요", "tone": "neutral"},
+    {"id": "MealLittle",     "cat": "Meal", "label": "식사 조금만",     "phrase": "입맛이 없으신지 식사를 조금만 드셨어요", "tone": "caution"},
+    {"id": "MealRefuse",     "cat": "Meal", "label": "식사 거부",       "phrase": "오늘은 식사를 원하지 않으셔서 드시지 않았어요", "tone": "caution"},
+    {"id": "FluidGood",      "cat": "Meal", "label": "수분 충분",       "phrase": "물과 음료를 충분히 드셨어요", "tone": "good"},
+
+    {"id": "BowelNormal",    "cat": "Toilet", "label": "배변 정상",     "phrase": "배변은 평소처럼 보셨어요", "tone": "good"},
+    {"id": "Constipation",   "cat": "Toilet", "label": "변비",          "phrase": "변을 보지 못하셔서 변비가 있는지 살펴보고 있어요", "tone": "caution"},
+    {"id": "Diarrhea",       "cat": "Toilet", "label": "설사",          "phrase": "묽은 변을 보셔서 수분을 더 챙겨 드렸어요", "tone": "caution"},
+    {"id": "UrineNormal",    "cat": "Toilet", "label": "소변 정상",     "phrase": "소변은 평소처럼 보셨어요", "tone": "good"},
+    {"id": "DiaperChange",   "cat": "Toilet", "label": "기저귀 교체",   "phrase": "기저귀를 때맞춰 갈아 드리고 피부를 깨끗이 닦아 드렸어요", "tone": "neutral"},
+
+    {"id": "SleepWell",      "cat": "Sleep", "label": "숙면",           "phrase": "편안하게 푹 주무셨어요", "tone": "good"},
+    {"id": "Nap",            "cat": "Sleep", "label": "낮잠",           "phrase": "낮에 잠시 낮잠을 주무셨어요", "tone": "neutral"},
+    {"id": "SleepPoor",      "cat": "Sleep", "label": "잠 설침",        "phrase": "잠을 깊이 못 주무시고 자주 깨셨어요", "tone": "caution"},
+    {"id": "RestCalm",       "cat": "Sleep", "label": "편안히 휴식",    "phrase": "편안하게 쉬시며 안정된 시간을 보내셨어요", "tone": "good"},
+
+    {"id": "MedTaken",       "cat": "Medication", "label": "복약 완료",  "phrase": "정해진 약을 시간 맞춰 드셨어요", "tone": "good"},
+    {"id": "MedRefused",     "cat": "Medication", "label": "복약 거부",  "phrase": "약을 드시기 싫어하셔서 드시지 않았어요", "tone": "caution"},
+    {"id": "VitalChecked",   "cat": "Medication", "label": "혈압·혈당 측정", "phrase": "혈압과 혈당을 재어 기록해 두었어요", "tone": "neutral"},
+    {"id": "Ointment",       "cat": "Medication", "label": "연고·파스",  "phrase": "필요한 곳에 연고를 발라 드렸어요", "tone": "neutral"},
+
+    {"id": "Walk",           "cat": "Activity", "label": "산책",         "phrase": "바깥 공기를 쐬며 함께 산책했어요", "tone": "good"},
+    {"id": "IndoorWalk",     "cat": "Activity", "label": "실내 걷기",    "phrase": "실내에서 천천히 걷기 운동을 하셨어요", "tone": "good"},
+    {"id": "JointExercise",  "cat": "Activity", "label": "관절 운동",    "phrase": "손발과 관절을 풀어 주는 운동을 함께 했어요", "tone": "good"},
+    {"id": "Cognitive",      "cat": "Activity", "label": "인지 활동",    "phrase": "색칠·퍼즐 같은 인지 활동을 즐겁게 하셨어요", "tone": "good"},
+    {"id": "Leisure",        "cat": "Activity", "label": "여가 활동",    "phrase": "좋아하시는 음악과 TV를 보며 여가를 보내셨어요", "tone": "good"},
+
+    {"id": "FaceWash",       "cat": "Hygiene", "label": "세면",          "phrase": "세수와 손 씻기를 도와 드렸어요", "tone": "neutral"},
+    {"id": "Bath",           "cat": "Hygiene", "label": "목욕",          "phrase": "목욕을 개운하게 도와 드렸어요", "tone": "good"},
+    {"id": "OralCare",       "cat": "Hygiene", "label": "구강 관리",     "phrase": "양치와 틀니 관리를 해 드렸어요", "tone": "neutral"},
+    {"id": "HairWash",       "cat": "Hygiene", "label": "머리 감기",     "phrase": "머리를 감겨 드리고 말려 드렸어요", "tone": "neutral"},
+    {"id": "ChangeClothes",  "cat": "Hygiene", "label": "옷 갈아입기",   "phrase": "깨끗한 옷으로 갈아입혀 드렸어요", "tone": "neutral"},
+
+    {"id": "MoodGood",       "cat": "Mood", "label": "기분 좋음",        "phrase": "기분이 좋으시고 자주 웃으셨어요", "tone": "good"},
+    {"id": "Chatty",         "cat": "Mood", "label": "대화 즐거워함",    "phrase": "옛날이야기를 들려주시며 대화를 즐거워하셨어요", "tone": "good"},
+    {"id": "Anxious",        "cat": "Mood", "label": "불안해함",         "phrase": "조금 불안해하셔서 곁에서 안심시켜 드렸어요", "tone": "caution"},
+    {"id": "Down",           "cat": "Mood", "label": "우울해 보임",      "phrase": "기운이 없고 우울해 보이셔서 말벗이 되어 드렸어요", "tone": "caution"},
+    {"id": "Irritable",      "cat": "Mood", "label": "예민함",           "phrase": "예민하신 모습이 있어 차분히 기다려 드렸어요", "tone": "caution"},
+
+    {"id": "ConditionGood",  "cat": "Health", "label": "컨디션 좋음",    "phrase": "전반적으로 컨디션이 좋아 보이셨어요", "tone": "good"},
+    {"id": "Cough",          "cat": "Health", "label": "기침",           "phrase": "기침을 하셔서 따뜻한 물을 챙겨 드렸어요", "tone": "caution"},
+    {"id": "PainComplaint",  "cat": "Health", "label": "통증 호소",      "phrase": "아프신 곳이 있다고 하셔서 살펴보았어요", "tone": "caution"},
+    {"id": "SkinCare",       "cat": "Health", "label": "피부·욕창 주의", "phrase": "피부가 붉어진 곳이 있어 자세를 자주 바꿔 드렸어요", "tone": "caution"},
+
+    {"id": "ChipFall",        "cat": "Safety", "label": "낙상",          "phrase": "넘어지는 일이 있어 다친 곳이 없는지 확인했어요", "tone": "alert", "alert": "Alert_Fall", "term": "Fall"},
+    {"id": "ChipFever",       "cat": "Safety", "label": "발열",          "phrase": "열이 있어 체온을 재고 시원하게 해 드렸어요", "tone": "alert", "alert": "Alert_Fever", "term": "Fever"},
+    {"id": "ChipDyspnea",     "cat": "Safety", "label": "호흡곤란",      "phrase": "숨쉬기 힘들어하셔서 자세를 바로 하고 상태를 지켜보았어요", "tone": "alert", "alert": "Alert_Dyspnea", "term": "Dyspnea"},
+    {"id": "ChipAspiration",  "cat": "Safety", "label": "사레·흡인",     "phrase": "식사 중 사레가 들려 등을 두드려 드리고 살펴보았어요", "tone": "alert", "alert": "Alert_Aspiration", "term": "Aspiration"},
+    {"id": "ChipConsciousness","cat": "Safety", "label": "의식 저하",    "phrase": "평소보다 반응이 느리고 의식이 흐려 보이셨어요", "tone": "alert", "alert": "Alert_Consciousness"},
+    {"id": "ChipSeizure",     "cat": "Safety", "label": "경련",          "phrase": "경련 증상이 있어 주변을 치우고 안전하게 지켜보았어요", "tone": "alert", "alert": "Alert_Seizure"},
+    {"id": "ChipChestPain",   "cat": "Safety", "label": "흉통",          "phrase": "가슴 통증을 말씀하셔서 쉬시게 하고 상태를 살폈어요", "tone": "alert", "alert": "Alert_ChestPain"},
+    {"id": "ChipDehydration", "cat": "Safety", "label": "탈수 의심",     "phrase": "소변이 적고 입이 말라 탈수가 걱정되어 수분을 챙겨 드렸어요", "tone": "alert", "alert": "Alert_Dehydration", "term": "Dehydration"},
+    {"id": "ChipJaundice",    "cat": "Safety", "label": "신생아 황달",   "phrase": "아기 피부와 눈이 노랗게 보여 황달이 있는지 살펴보았어요", "tone": "alert", "alert": "Alert_Jaundice"},
+    {"id": "ChipCrisis",      "cat": "Safety", "label": "위기 징후",     "phrase": "힘든 마음을 표현하셔서 곁에서 이야기를 들어 드렸어요", "tone": "alert", "alert": "Alert_Crisis"},
+
+    {"id": "Cleaning",       "cat": "Living", "label": "청소",           "phrase": "생활 공간을 깨끗하게 청소해 드렸어요", "tone": "neutral"},
+    {"id": "Laundry",        "cat": "Living", "label": "세탁",           "phrase": "빨래를 하고 정리해 드렸어요", "tone": "neutral"},
+    {"id": "MealPrep",       "cat": "Living", "label": "식사 준비",      "phrase": "드시기 편한 식사를 준비해 드렸어요", "tone": "neutral"},
+    {"id": "Escort",         "cat": "Living", "label": "외출·병원 동행", "phrase": "외출과 병원 방문에 함께 다녀왔어요", "tone": "neutral"},
+
+    {"id": "Feeding",        "cat": "Newborn", "label": "수유 완료",     "phrase": "아기가 수유를 잘 마쳤어요", "tone": "good"},
+    {"id": "NewbornBath",    "cat": "Newborn", "label": "신생아 목욕",   "phrase": "아기 목욕을 안전하게 마쳤어요", "tone": "good"},
+    {"id": "NewbornSleep",   "cat": "Newborn", "label": "아기 숙면",     "phrase": "아기가 편안하게 잘 잤어요", "tone": "good"},
+    {"id": "MotherRecovery", "cat": "Newborn", "label": "산모 회복 돌봄", "phrase": "산모님이 편히 쉬시도록 좌욕과 회복 식사를 도와 드렸어요", "tone": "good"}
+  ]
+}

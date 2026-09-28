@@ -292,6 +292,19 @@ def main() -> int:
         SELECT (COUNT(DISTINCT ?cg) AS ?n) WHERE {{ GRAPH <{GRAPH_DATA}> {{
             ?cg a care:Caregiver ; care:status "active" . FILTER NOT EXISTS {{ ?cg care:lat ?l }} }} }}"""))
 
+    # ── F. care-journal 계층(기능 37·40) — 칩 55·표현조각 55, 위험 칩 ↔ 안전 알림 10종 ───────
+    CJ = "PREFIX cj: <http://caren.aiclaude.kr/ontology/journal#>\n"
+    src = json.load(open(os.path.join(HERE, "care_journal.json"), encoding="utf-8"))
+    n_src = len(src["chips"])
+    check("칩(cj:Chip)", n_src, scalar(CJ + f"SELECT (COUNT(DISTINCT ?c) AS ?n) WHERE {{ GRAPH <{GRAPH_SCHEMA}> {{ ?c a cj:Chip }} }}"),
+          "care_journal.json 과 같아야")
+    check("표현조각(cj:Phrase)", n_src, scalar(CJ + f"""SELECT (COUNT(DISTINCT ?p) AS ?n) WHERE {{ GRAPH <{GRAPH_SCHEMA}> {{
+            ?c a cj:Chip ; cj:hasPhrase ?p ; cj:inCategory ?cat . ?p cj:text ?t }} }}"""), "칩마다 문장·분류")
+    check("안전 알림 10종 모두 칩 있음", 10, scalar(CJ + f"""SELECT (COUNT(DISTINCT ?a) AS ?n) WHERE {{ GRAPH <{GRAPH_SCHEMA}> {{
+            ?c cj:raisesAlert ?a . ?a a care:SafetyAlert }} }}"""), "위험 칩이 없는 알림 = 결정적 알림 누락")
+    check("위험 칩의 알림 대상 실재", 0, scalar(CJ + f"""SELECT (COUNT(DISTINCT ?c) AS ?n) WHERE {{ GRAPH <{GRAPH_SCHEMA}> {{
+            ?c cj:raisesAlert ?a . FILTER NOT EXISTS {{ ?a a care:SafetyAlert }} }} }}"""), "오타면 알림이 조용히 안 감")
+
     total = scalar(f"SELECT (COUNT(*) AS ?n) WHERE {{ GRAPH <{GRAPH_DATA}> {{ ?s ?p ?o }} }}")
     schema_n = scalar(f"SELECT (COUNT(*) AS ?n) WHERE {{ GRAPH <{GRAPH_SCHEMA}> {{ ?s ?p ?o }} }}")
 

@@ -53,8 +53,15 @@ put_graph() {
 }
 
 # ── 1. 스키마 ───────────────────────────────────────────────────────────────
-say "스키마 적재: $TTL"
-put_graph "$TTL" "$GRAPH_SCHEMA" "text/turtle"
+# 스키마 그래프 = care-domain(매칭·STT) + care-journal(일지 칩, 기능 37·40) 2계층.
+# care-journal.ttl 은 care_journal.json 에서 생성한다(gen_care_journal.py). PUT 은 그래프 통째 교체라
+# 두 파일을 합쳐 한 번에 올린다 — 따로 올리면 뒤엣것이 앞엣것을 지운다.
+say "care-journal 생성: gen_care_journal.py"
+"$PYTHON" "$DIR/gen_care_journal.py"
+SCHEMA_ALL="$DIR/out/schema-all.ttl"
+cat "$TTL" "$DIR/care-journal.ttl" > "$SCHEMA_ALL"
+say "스키마 적재: $TTL + care-journal.ttl"
+put_graph "$SCHEMA_ALL" "$GRAPH_SCHEMA" "text/turtle"
 [[ $schema_only -eq 1 ]] && { say "스키마만 적재하고 종료"; exit 0; }
 
 # ── 2. 추출(읽기 전용) ──────────────────────────────────────────────────────

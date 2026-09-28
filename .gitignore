@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 models/
 ontology/out/
+# 평가 음성은 개인정보 — 저장소에 올리지 않는다
+eval/stt/audio/

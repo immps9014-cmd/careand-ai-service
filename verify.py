@@ -38,6 +38,8 @@ _NEG_AFTER = re.compile(r"^.{0,8}?(않|없|안\s|아니|말도록|않도록|주�
 
 _UNIT = r"(분|시간|%|퍼센트|그릇|공기|숟가락|회|번|잔|컵|ml|mL|cc|mg|g|kg|도|℃|mmHg|mg/dL|개|알|정)"
 _NUM = re.compile(r"(\d+(?:\.\d+)?)\s*" + _UNIT)
+# 활력징후 단어 바로 뒤의 숫자(단위 생략 표기) — 예: 혈압 150/90, 혈당은 180, 맥박 88
+_VITAL_BARE = re.compile(r"(혈압|혈당|체온|맥박|심박수?|산소포화도)\s*(?:은|는|이|가|을|를|도)?\s*(\d+(?:\.\d+)?(?:\s*/\s*\d+)?)")
 _SENSITIVE = [(k, p) for k, p in pii._PATTERNS if k in ("주민번호", "전화", "이메일")]
 
 # 원문의 말 표현 ↔ 수치 (반 그릇 = 50% 등) — 일지가 수치로 바꿔 쓴 경우 근거로 인정
@@ -80,7 +82,7 @@ def _numbers(text: str) -> list[str]:
 _UNIT_GROUP = {"%": "pct", "퍼센트": "pct", "ml": "ml", "mL": "ml", "cc": "ml", "도": "temp", "℃": "temp",
                "회": "times", "번": "times", "개": "piece", "알": "piece", "정": "piece"}
 # 말할 때 단위를 빼는 수치(혈압 "130에 80", 혈당 "150") — 숫자만 맞아도 근거로 인정
-_BARE_OK = {"mmHg", "mg/dL"}
+_BARE_OK = {"mmHg", "mg/dL", "도", "℃"}   # 체온도 말할 때 단위를 뺀다("체온 36.5") — S6 시험에서 오탐 발견
 
 
 def _supported_number(claim: str, source_norm: str, source_raw: str) -> bool:
@@ -109,6 +111,16 @@ def verify(output: str, source: str) -> dict[str, Any]:
         claims += 1
         if not _supported_number(c, src_norm, source or ""):
             unsupported.append({"type": "수치", "claim": c})
+
+    # 단위 없이 쓴 활력징후("혈압 150/90", "혈당은 180") — 단위 정규식에 안 걸려 검증에서 빠지던 것(S6 시험에서 발견)
+    seen_units = {re.sub(r"\D", "", c) for c in _numbers(out)}
+    for m in _VITAL_BARE.finditer(out):
+        val = m.group(2)
+        if re.sub(r"\D", "", val) in seen_units:
+            continue                                        # 단위 달린 같은 수치로 이미 셌다
+        claims += 1
+        if not all(re.search(r"(?<!\d)" + re.escape(n) + r"(?!\d)", source or "") for n in re.findall(r"\d+(?:\.\d+)?", val)):
+            unsupported.append({"type": "수치", "claim": f"{m.group(1)} {val}"})
 
     # 안전 알림의 감지 표현은 해당 용어의 근거로 인정 — 원문 "미끄러지셨다" → 일지 "낙상"
     synonyms: dict[str, list[str]] = {}

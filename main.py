@@ -46,7 +46,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 EXPECTED_TOKEN = os.environ.get("AI_SERVICE_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5-5")
 
 # LLM 프로바이더 선택: "anthropic"(Claude) | "gemini"(Google). 기본 anthropic.
 # 이 박스는 egress 제한이 있으나 Google HTTPS(generativelanguage.googleapis.com)는 도달 가능 —

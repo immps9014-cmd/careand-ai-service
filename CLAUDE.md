@@ -14,8 +14,11 @@ backend는 Apache DocumentRoot·PHP-FPM 설정 의존성 때문에 `/var/www/car
 
 ## 배포 토폴로지
 
-서버 `103.55.191.157` (SSH만 가능, 외부 아웃바운드 화이트리스트 제한 — pip/npm 등은 국내 미러 경유),
-도메인 `caren.aiclaude.kr` (구 `careand.aiclaude.kr`는 301 리다이렉트), Apache vhost `/etc/httpd/conf.d/20-migrated-ssl.conf`.
+서버 `103.55.190.159` (호스트명 `aiclaude`, 2코어·7.5GB — **2026-10-19 `103.55.191.157`에서 이전**, caren 전용 운영·개발 서버.
+같은 서버에 gunhaeng 사이트가 함께 있으니 건드리지 말 것). SSH만 가능, 외부 아웃바운드 제한(npm·pypi 차단, github·Gemini·Anthropic API는 열림 — pip/npm 등은 국내 미러 경유).
+도메인 `caren.aiclaude.kr` (구 `careand.aiclaude.kr`는 301 리다이렉트), Apache vhost `/etc/httpd/conf.d/caren.conf`,
+인증서는 `/etc/pki/caren/aiclaude-wildcard/`(191.157에서 갱신한 와일드카드 사본 — **갱신 때마다 여기도 교체**, 현재 2026-12-22 만료).
+온톨로지 Fuseki는 caren 전용 `caren-fuseki.service`(127.0.0.1:3030, -Xmx256m). 백업은 이 서버 `/backup/careand/`, 오프사이트는 191.157로 보낸다.
 
 ```
 caren.aiclaude.kr
